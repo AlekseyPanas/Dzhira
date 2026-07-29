@@ -1,0 +1,346 @@
+// Dzhira's look: designed-by-a-12-year-old-in-MS-Paint. Comic Sans, clashing crayon colors, thick
+// wobbly black outlines, slightly-rotated cards, chunky offset shadows. Loud, but readable: dark
+// text on light cards, real contrast, nothing tiny.
+
+:root {
+    --ink: #101010;
+    --paper: #fdf6e3;
+    --hotpink: #ff5ecb;
+    --skyblue: #56ccf2;
+    --lime: #b6ff3d;
+    --sunny: #ffe14d;
+    --orange: #ff9a3d;
+    --purple: #b06bff;
+    --card: #fffdf5;
+    --outline: 4px solid var(--ink);
+}
+
+* { box-sizing: border-box; }
+
+body {
+    margin: 0;
+    font-family: "Comic Sans MS", "Comic Sans", "Chalkboard SE", "Marker Felt", cursive;
+    color: var(--ink);
+    background-color: #7ee0ff;
+    background-image:
+        radial-gradient(circle at 20% 30%, rgba(255, 255, 255, 0.5) 0 8px, transparent 9px),
+        radial-gradient(circle at 70% 60%, rgba(255, 255, 255, 0.35) 0 6px, transparent 7px),
+        repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.10) 0 14px, transparent 14px 28px);
+    background-attachment: fixed;
+}
+
+button { font-family: inherit; cursor: pointer; }
+
+.app { min-height: 100vh; padding-bottom: 40px; }
+
+// ------------------------------------------------------------------ topbar
+.topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+    padding: 10px 18px;
+    background: var(--hotpink);
+    border-bottom: 6px solid var(--ink);
+    box-shadow: 0 6px 0 rgba(0, 0, 0, 0.25);
+}
+
+.brand {
+    font-size: 34px;
+    font-weight: 900;
+    color: #fff;
+    text-shadow: 3px 3px 0 var(--ink), -1px -1px 0 var(--ink);
+    transform: rotate(-3deg);
+    letter-spacing: 1px;
+}
+.brand-crayon { display: inline-block; transform: rotate(12deg); }
+
+.topbar-buttons { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+.crayon-btn {
+    background: var(--sunny);
+    border: var(--outline);
+    border-radius: 14px 8px 16px 6px;
+    padding: 8px 14px;
+    font-size: 16px;
+    font-weight: 700;
+    box-shadow: 3px 3px 0 var(--ink);
+    transition: transform 0.06s ease, box-shadow 0.06s ease;
+}
+.crayon-btn:hover { transform: translate(-1px, -1px) rotate(-1deg); box-shadow: 5px 5px 0 var(--ink); }
+.crayon-btn:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 var(--ink); }
+.crayon-btn.big-add { background: var(--lime); font-size: 17px; }
+.crayon-btn.danger { background: #ff5b5b; color: #fff; }
+
+.assignee-button {
+    display: flex; align-items: center; gap: 8px;
+    background: var(--skyblue);
+    border: var(--outline);
+    border-radius: 30px;
+    padding: 4px 12px 4px 4px;
+    font-weight: 700;
+    box-shadow: 3px 3px 0 var(--ink);
+}
+.assignee-name { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+// ------------------------------------------------------------------ assignee circle + tag chips
+.assignee-circle {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 26px; height: 26px; border-radius: 50%;
+    border: 3px solid var(--ink);
+    font-weight: 900; font-size: 14px;
+    flex: 0 0 auto;
+}
+.assignee-circle.big { width: 38px; height: 38px; font-size: 20px; }
+
+.tag-chip {
+    display: inline-block;
+    padding: 1px 9px;
+    margin: 2px 3px 0 0;
+    border: 2.5px solid var(--ink);
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 700;
+    box-shadow: 2px 2px 0 rgba(0, 0, 0, 0.35);
+}
+
+// ------------------------------------------------------------------ the board
+.board {
+    display: flex;
+    align-items: flex-start;
+    gap: 20px;
+    padding: 24px 20px;
+    overflow-x: auto;
+    min-height: 70vh;
+}
+
+.board-empty {
+    font-size: 20px; font-weight: 700; color: #fff;
+    text-shadow: 2px 2px 0 var(--ink);
+    padding: 30px;
+}
+
+.board-column {
+    flex: 0 0 300px;
+    background: rgba(255, 255, 255, 0.75);
+    border: var(--outline);
+    border-radius: 18px 10px 20px 8px;
+    box-shadow: 6px 6px 0 rgba(0, 0, 0, 0.3);
+    padding: 10px;
+}
+.board-column:nth-child(3n) { transform: rotate(-1deg); }
+.board-column:nth-child(3n+1) { transform: rotate(0.6deg); }
+
+.column-header {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    background: var(--purple);
+    color: #fff;
+    border: 3px solid var(--ink);
+    border-radius: 12px 6px 12px 6px;
+    padding: 6px 12px;
+    margin-bottom: 10px;
+    text-shadow: 1.5px 1.5px 0 var(--ink);
+}
+.column-name { font-size: 19px; font-weight: 900; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.column-count {
+    background: var(--sunny); color: var(--ink);
+    border: 2.5px solid var(--ink); border-radius: 50%;
+    min-width: 26px; height: 26px; padding: 0 4px;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-weight: 900; font-size: 13px; text-shadow: none; flex: 0 0 auto;
+}
+
+.column-tasks { display: flex; flex-direction: column; gap: 12px; min-height: 30px; }
+.column-empty {
+    border: 3px dashed var(--ink);
+    border-radius: 12px;
+    padding: 14px 10px;
+    text-align: center;
+    font-size: 13px;
+    color: #555;
+    background: rgba(255, 255, 255, 0.4);
+}
+
+.add-column {
+    flex: 0 0 92px;
+    align-self: stretch;
+    min-height: 120px;
+    background: var(--lime);
+    border: 4px dashed var(--ink);
+    border-radius: 18px;
+    font-size: 18px; font-weight: 900; line-height: 1.1;
+    box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.3);
+}
+.add-column:hover { transform: rotate(-2deg) scale(1.03); }
+
+// ------------------------------------------------------------------ task card
+.task-card {
+    position: relative;
+    background: var(--card);
+    border: var(--outline);
+    border-radius: 12px 14px 10px 16px;
+    box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.28);
+    padding: 10px 12px 8px;
+    cursor: pointer;
+    transition: transform 0.08s ease, box-shadow 0.08s ease;
+}
+.task-card:nth-child(2n) { transform: rotate(-0.8deg); }
+.task-card:nth-child(3n) { transform: rotate(0.9deg); }
+.task-card:hover { transform: translate(-2px, -2px) rotate(0deg); box-shadow: 7px 7px 0 rgba(0, 0, 0, 0.32); }
+
+.card-trash {
+    position: absolute; top: 4px; right: 4px;
+    background: transparent; border: none; font-size: 15px;
+    opacity: 0; transition: opacity 0.1s ease;
+    padding: 2px;
+}
+.task-card:hover .card-trash { opacity: 1; }
+.card-trash:hover { transform: scale(1.25) rotate(-8deg); }
+
+.card-title { font-size: 16px; font-weight: 900; padding-right: 18px; word-break: break-word; }
+.card-desc { font-size: 12.5px; color: #444; margin-top: 3px; line-height: 1.25; }
+
+.card-footer { display: flex; align-items: flex-end; justify-content: space-between; gap: 6px; margin-top: 8px; }
+.card-tags { display: flex; flex-wrap: wrap; max-width: 66%; }
+.card-meta { display: flex; align-items: center; gap: 7px; flex: 0 0 auto; }
+.card-id {
+    font-family: "Courier New", monospace;
+    font-weight: 700; font-size: 11px;
+    background: var(--sunny);
+    border: 2px solid var(--ink); border-radius: 6px;
+    padding: 0 5px;
+    white-space: nowrap;
+}
+
+// ------------------------------------------------------------------ drag & drop
+.task-card { touch-action: none; }              // let the pointer drag own the gesture (no scroll)
+.task-card.drag-hidden { display: none; }       // the source card, hidden while it's being dragged
+
+.ghost-slot {
+    border: 4px dashed var(--ink);
+    border-radius: 12px;
+    background: repeating-linear-gradient(45deg, rgba(0,0,0,0.06) 0 8px, transparent 8px 16px);
+    margin: 0;
+}
+
+.dragging-float {
+    position: fixed;
+    z-index: 100;
+    margin: 0 !important;
+    pointer-events: none;                       // so elementFromPoint / hover ignores it
+    transform: rotate(-4deg) scale(1.04);
+    box-shadow: 10px 12px 0 rgba(0, 0, 0, 0.35);
+    opacity: 0.95;
+}
+
+body.is-dragging { cursor: grabbing; user-select: none; }
+body.is-dragging .column-empty { display: none; }   // the ghost slot stands in for the empty hint
+
+// ------------------------------------------------------------------ modals
+.modal-backdrop {
+    position: fixed; inset: 0;
+    background: rgba(0, 0, 0, 0.45);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 50; padding: 20px;
+}
+.modal-box {
+    background: var(--paper);
+    border: 5px solid var(--ink);
+    border-radius: 18px 8px 18px 8px;
+    box-shadow: 9px 9px 0 rgba(0, 0, 0, 0.4);
+    width: 420px; max-width: 100%;
+    transform: rotate(-0.6deg);
+}
+.modal-box.wide { width: 620px; }
+.modal-titlebar {
+    display: flex; align-items: center; justify-content: space-between;
+    background: var(--orange);
+    border-bottom: 4px solid var(--ink);
+    border-radius: 12px 4px 0 0;
+    padding: 8px 14px;
+}
+.modal-title { font-size: 20px; font-weight: 900; text-shadow: 1.5px 1.5px 0 rgba(255, 255, 255, 0.6); }
+.modal-x {
+    background: #ff5b5b; color: #fff;
+    border: 3px solid var(--ink); border-radius: 8px;
+    width: 30px; height: 30px; font-weight: 900;
+}
+.modal-body { padding: 16px; }
+
+.modal-box.confirm { width: 400px; text-align: center; padding: 20px; }
+.confirm-bang { font-size: 44px; }
+.confirm-message { font-size: 16px; font-weight: 700; margin: 8px 0 16px; }
+.modal-buttons { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+
+.under-construction { text-align: center; font-size: 16px; font-weight: 700; padding: 24px 8px; }
+
+// ------------------------------------------------------------------ shared form bits (used by editors)
+.field-label { display: block; font-weight: 900; margin: 10px 0 4px; }
+.text-input, .area-input, .select-input {
+    width: 100%;
+    font-family: inherit; font-size: 15px;
+    border: 3px solid var(--ink); border-radius: 10px 6px 10px 6px;
+    padding: 7px 10px; background: #fff;
+}
+.area-input { min-height: 80px; resize: vertical; }
+.form-error { color: #c00; font-weight: 700; margin-top: 8px; }
+.list-row {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    border: 3px solid var(--ink); border-radius: 10px;
+    background: #fff; padding: 6px 8px; margin-bottom: 8px;
+}
+.list-row.new { background: #f4ffe0; border-style: dashed; }
+.grow { flex: 1 1 auto; min-width: 0; }
+.muted { color: #777; font-size: 13px; }
+
+button:disabled { opacity: 0.4; cursor: default; }
+.crayon-btn.save { background: var(--lime); }
+
+.list-divider {
+    text-align: center; font-weight: 900; color: #888;
+    margin: 14px 0 6px; text-transform: uppercase; font-size: 12px; letter-spacing: 1px;
+}
+.linkish { background: none; border: none; color: #0a58ff; font-weight: 900; text-decoration: underline; }
+
+// color swatch inputs
+.swatch { width: 40px; height: 34px; padding: 2px; border: 3px solid var(--ink); border-radius: 8px; background: #fff; }
+.swatch.big { width: 64px; height: 40px; }
+.code-input { width: 84px; text-transform: uppercase; font-family: "Courier New", monospace; font-weight: 900; letter-spacing: 2px; }
+
+.editor-buttons { justify-content: flex-end; margin-top: 16px; }
+
+// tag picker (task editor)
+.tag-picker { display: flex; flex-wrap: wrap; gap: 6px; }
+.tag-chip.pick {
+    cursor: pointer; font-size: 13px; padding: 3px 11px;
+    background: #fff;
+}
+.tag-chip.pick.off { opacity: 0.75; }
+.tag-chip.pick.on { box-shadow: 3px 3px 0 rgba(0,0,0,0.35); transform: rotate(-1deg); }
+
+// assignee editor
+.assignee-editor-row { display: flex; align-items: flex-start; gap: 16px; margin-top: 10px; }
+.assignee-circle.huge { width: 72px; height: 72px; font-size: 38px; border-width: 4px; }
+
+// column header controls
+.column-arrows { display: flex; gap: 2px; }
+.mini-btn {
+    background: var(--sunny); color: var(--ink);
+    border: 2.5px solid var(--ink); border-radius: 7px;
+    min-width: 24px; height: 24px; padding: 0 4px;
+    font-weight: 900; font-size: 13px; line-height: 1;
+    text-shadow: none;
+}
+.mini-btn.danger { background: #ff7a7a; }
+.mini-btn:hover:not(:disabled) { transform: scale(1.12) rotate(-3deg); }
+.column-name { cursor: pointer; }
+.column-name-input {
+    font-family: inherit; font-weight: 900; font-size: 16px;
+    border: 2.5px solid var(--ink); border-radius: 8px; padding: 2px 8px; min-width: 0;
+}
+
+// Inside a row, inputs flex to fill instead of forcing their own line (.text-input is 100% wide).
+.list-row .text-input { width: auto; }
+.list-row .text-input.grow { flex: 1 1 120px; }
+.list-row .code-input { flex: 0 0 auto; }

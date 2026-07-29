@@ -141,3 +141,11 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+# ---- Dzhira: Python + runtime data ----
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+# The JSON DB folder is runtime data (created + seeded on first run), not source.
+/db/
