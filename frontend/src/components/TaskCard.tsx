@@ -5,7 +5,7 @@
 import Nano, { h } from "nano-jsx";
 import { taskApi } from "../api";
 import { consumeDragClick } from "../drag_controller";
-import { contrastInk, firstInitial, membersById, projectColor, projectOf, tagsById, type Task } from "../model";
+import { contrastInk, deadlineStatus, firstInitial, formatDeadline, membersById, projectColor, projectOf, tagsById, type Task } from "../model";
 import { askConfirm, openPopup } from "../ui";
 import { truncate } from "./shared_widgets";
 
@@ -14,6 +14,7 @@ export const TaskCard = (props: { task: Task }) => {
     const tagMap = tagsById();
     const memberMap = membersById();
     const projectHue = projectColor(projectOf(task.id));    // the card's left stripe + id badge color
+    const dueStatus = deadlineStatus(task.deadline);        // "past" | "soon" | "later" | null
 
     const onDelete = (event: Event) => {
         event.stopPropagation();                            // don't also open the editor
@@ -39,6 +40,11 @@ export const TaskCard = (props: { task: Task }) => {
                 : null}
             <div class="card-footer">
                 <div class="card-tags">
+                    {dueStatus
+                        ? <span class={`deadline-chip ${dueStatus}`} title={`due ${task.deadline}`}>
+                              📅 {formatDeadline(task.deadline!)}
+                          </span>
+                        : null}
                     {task.tags.map((tagId) => {
                         const tag = tagMap[tagId];
                         if (!tag) return null;

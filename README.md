@@ -92,6 +92,15 @@ card's left edge and the tinted `#PROJ-NNN` id badge. Add, rename, or recolor pr
 **Assignees.** See *Accounts & boards* above — assignees are board members, chosen per task in the
 editor (zero or more). Each shows as an initial-circle in their color (black/white initial for contrast).
 
+**Deadlines.** A task can have an optional date. The card shows a 📅 chip coloured against *your* local
+clock: **red** if overdue, **yellow** if due within a few days, **grey** otherwise.
+
+**Filters.** The bar at the bottom filters what you see by **assignee, tags, and project** (any-of within
+a group, all-of across groups). The assignee row also has an explicit **unassigned** chip for tasks with
+nobody on them. Your selection is saved to the board and follows you across tabs/reloads — and it's yours
+alone; it doesn't change what anyone else sees. You can still **drag to reorder while a filter is on**:
+a card lands relative to the visible card above it, and any hidden tasks keep their places.
+
 **Themes.** Bottom-right corner: swap between **🖌️ paint** and **✏️ crisp**. **Paint is the default** —
 a gloriously bad hand-painted look: wobbly, half-disconnected outlines, a mostly white/grey canvas (no
 crayon rainbow), and colour fills that look brushed-in badly with visible strokes and gaps (only the
@@ -405,6 +414,33 @@ folder of `board.json` + `columns/ tags/ projects/ tasks/`. A task gained `assig
   `NoBoardsPage`, `BoardView`, and the `board_menus.tsx` (switcher, invite, profile+members). The theme
   selector is intentionally hidden and **paint is forced** in `client.tsx` (nothing deleted — see the
   note in `BoardView`).
+
+#### 2.11 Shared mirror, deadlines & filter views
+
+- **One shared mirror per board (ref-counted)**, not one per socket: `AppServices.acquire_board_mirror`
+  / `release_board_mirror` create the `JsonFolderDerivedDict` + its single watcher on the first
+  connection and drop them on the last. All sockets subscribe to the same mirror (the pub/sub core is
+  multi-subscriber), so `publish` fans out to everyone and a write resyncs the *one* mirror. This is the
+  memory win over the earlier per-connection model.
+- **Deadlines:** an optional date-only `deadline` on the task (validated in `board_api._clean_deadline`).
+  The chip colour compares it to the **viewer's** local today — a `nowFrame` ticked client-side
+  ([`client.tsx`](frontend/src/client.tsx)), deliberately *not* server time and *not* in the mirror.
+  `model.deadlineStatus` → past/soon/later.
+- **Filter views:** `boards/<bid>/views/<user_id>.json` lives in the board folder, so it rides the shared
+  mirror — everyone gets everyone's views, and each client applies only its own. Filtering is
+  **client-side** (`model.taskPassesView`); the backend stores only the preference (`BoardAPI.set_view`,
+  `POST /api/view/set`). The bottom [`FilterBar`](frontend/src/components/FilterBar.tsx) toggles it. The
+  WHO group includes an explicit **unassigned** chip — a `UNASSIGNED` sentinel (`"__none__"`, which can
+  never collide with a `usr_…` id) stored in `view.assignees`, matching tasks with no assignee.
+- **Anchor-based reordering (filter-safe):** `move_task` takes an `after_task_id` anchor (the visible task
+  a card was dropped below; `None` = top) instead of a numeric index. The backend positions relative to
+  that task in the *full* lane, so a drop is correct even when hidden tasks sit around it — which is why
+  **drag stays enabled under a filter**. The client sends the visible neighbour from the DOM
+  (`drag_controller.anchorBeforeGhost`); an unknown/stale anchor falls back to the bottom of the lane.
+  A **drop-in-place** (same column + same anchor as where the card started, snapshotted in `beginDrag`)
+  short-circuits with no `move` call at all — otherwise the backend rewrites an identical `order`, the
+  derived dict diffs to nothing, no websocket echo comes back, and the commit-hold waits out its 2s
+  fallback (the "lag spike" on releasing a card where you picked it up).
 
 ---
 

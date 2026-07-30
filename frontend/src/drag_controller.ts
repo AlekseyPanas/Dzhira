@@ -26,6 +26,8 @@ interface Dragging {
     grabOffsetX: number;
     grabOffsetY: number;
     width: number;
+    homeColumn: string | null;  // where the card started — used to no-op a drop-in-place (see onPointerUp)
+    homeAnchor: string | null;
 }
 
 let pending: Pending | null = null;
@@ -46,7 +48,7 @@ export function installDragController(): void {
 }
 
 function onPointerDown(event: PointerEvent): void {
-    if (event.button !== 0 || committing) return;           // ignore new drags while a drop commits
+    if (event.button !== 0 || committing) return;           // no new drag while a commit is settling
     const target = event.target as HTMLElement;
     if (target.closest(".card-trash")) return;              // the trash button owns its own clicks
     const card = target.closest<HTMLElement>(".task-card");
@@ -68,6 +70,10 @@ function beginDrag(event: PointerEvent): void {
     if (!pending) return;
     const card = pending.card;
     const rect = card.getBoundingClientRect();
+
+    // Record the card's starting slot BEFORE we insert the ghost, so a drop back here is a cheap no-op.
+    const homeColumn = card.closest<HTMLElement>(".column-tasks")?.dataset.columnId ?? null;
+    const homeAnchor = taskIdBefore(card);
 
     const ghost = document.createElement("div");
     ghost.className = "ghost-slot";
@@ -91,6 +97,8 @@ function beginDrag(event: PointerEvent): void {
         grabOffsetX: event.clientX - rect.left,
         grabOffsetY: event.clientY - rect.top,
         width: rect.width,
+        homeColumn,
+        homeAnchor,
     };
     pending = null;
     updateDrag(event);
@@ -120,9 +128,16 @@ function onPointerUp(_event: PointerEvent): void {
 
     const container = drag.ghost.parentElement as HTMLElement | null;
     const statusId = container?.dataset.columnId;
-    const index = container ? indexOfGhost(container, drag.ghost, drag.taskId) : 0;
+    // Anchor the drop to the VISIBLE task just above it (or null = top). This is filter-safe: whatever
+    // the backend does with hidden tasks, "after this visible card" always means what the user saw.
+    const afterTaskId = container ? anchorBeforeGhost(container, drag.ghost, drag.taskId) : null;
 
     if (!statusId) { finishDrag(drag); return; }            // dropped nowhere — settle back in place
+
+    // Dropped exactly where it started: the backend would rewrite an identical order (same neighbours =
+    // same midpoint), so nothing changes on disk and NO websocket update comes back. Skipping the write
+    // avoids the commit-hold sitting until the 2s fallback — the "lag spike" on a drop-in-place.
+    if (statusId === drag.homeColumn && afterTaskId === drag.homeAnchor) { finishDrag(drag); return; }
 
     // Enter the COMMIT phase (the anti-flicker): snap the floating card onto the ghost slot and keep
     // it there, blocking any new drag, until the backend's change streams back over the websocket and
@@ -150,7 +165,7 @@ function onPointerUp(_event: PointerEvent): void {
 
     unsubscribe = boardFrame.subscribe(`tasks/${drag.taskId}.json`, finishOnce);   // the reply signal
     timer = setTimeout(finishOnce, COMMIT_TIMEOUT_MS);                          // no-op-move fallback
-    void taskApi.move(drag.taskId, statusId, index).then((error) => {
+    void taskApi.move(drag.taskId, statusId, afterTaskId).then((error) => {
         if (error) { console.error("[drag] move failed:", error); finishOnce(); }
     });
 }
@@ -189,13 +204,29 @@ function liveCards(container: HTMLElement, draggedId: string): HTMLElement[] {
         .filter((card) => card.dataset.taskId !== draggedId);
 }
 
-/** How many real (non-dragged) cards precede the ghost — the insertion index the backend expects. */
-function indexOfGhost(container: HTMLElement, ghost: HTMLElement, draggedId: string): number {
-    let index = 0;
+/** The id of the visible task card immediately before `card` among its siblings (its drop anchor at
+ *  rest), or null when it's the first. Used to snapshot the card's home slot at the start of a drag. */
+function taskIdBefore(card: HTMLElement): string | null {
+    let sibling = card.previousElementSibling;
+    while (sibling) {
+        const element = sibling as HTMLElement;
+        if (element.classList.contains("task-card") && element.dataset.taskId) return element.dataset.taskId;
+        sibling = sibling.previousElementSibling;
+    }
+    return null;
+}
+
+/** The id of the visible task card immediately ABOVE the ghost (the anchor to drop after), or null when
+ *  the ghost is at the very top / the column has no other visible cards. Only cards actually in the DOM
+ *  are considered, so under a filter this is naturally the visible neighbour, not a hidden one. */
+function anchorBeforeGhost(container: HTMLElement, ghost: HTMLElement, draggedId: string): string | null {
+    let anchor: string | null = null;
     for (const child of [...container.children]) {
         if (child === ghost) break;
         const element = child as HTMLElement;
-        if (element.classList.contains("task-card") && element.dataset.taskId !== draggedId) index++;
+        if (element.classList.contains("task-card") && element.dataset.taskId !== draggedId) {
+            anchor = element.dataset.taskId ?? anchor;
+        }
     }
-    return index;
+    return anchor;
 }

@@ -28,32 +28,52 @@ class AppServices:
         self.sessions = SessionStore(self.root)
         self.boards = BoardsStore(self.root)
         self.invites = InvitesStore(self.root)
-        # Live board mirrors, by board id — one per active websocket connection. Writes poke these
-        # in-process so live updates don't depend on watchdog/inotify actually firing (see
-        # notify_board_changed). Guarded because ws connections register/unregister on their own
-        # threads while HTTP writes poke from the request threadpool.
-        self._board_watchers: Dict[str, List[JsonFolderDerivedDict]] = {}
-        self._watchers_lock = threading.Lock()
+        # ONE live mirror per board that has >= 1 websocket, ref-counted: created (and its single
+        # watcher started) on the first connection, dropped on the last. Every socket on the board
+        # subscribes to this same mirror, so publish fans out to all of them (the pub/sub core is
+        # multi-subscriber). Writes poke the ONE mirror (notify_board_changed) so live updates don't
+        # depend on watchdog/inotify firing. Guarded: sockets acquire/release on their own threads
+        # while HTTP writes poke from the request threadpool.
+        self._board_mirrors: Dict[str, dict] = {}           # board_id -> {"mirror": …, "refs": int}
+        self._mirrors_lock = threading.Lock()
 
-    # ------------------------------------------------------------------ live board mirrors
-    def register_board_watcher(self, board_id: str, mirror: JsonFolderDerivedDict) -> None:
-        with self._watchers_lock:
-            self._board_watchers.setdefault(board_id, []).append(mirror)
+    # ------------------------------------------------------------------ live board mirrors (shared)
+    def acquire_board_mirror(self, board_id: str) -> JsonFolderDerivedDict:
+        """Get the board's shared mirror, creating + starting it on the first caller. Ref count up.
+        start_watching runs under the lock (a fast folder scan) so the mirror is fully populated
+        before any subscriber reads its snapshot."""
+        with self._mirrors_lock:
+            entry = self._board_mirrors.get(board_id)
+            if entry is None:
+                mirror = JsonFolderDerivedDict(paths.board_dir(self.root, board_id))
+                mirror.start_watching()
+                self._board_mirrors[board_id] = {"mirror": mirror, "refs": 1}
+                return mirror
+            entry["refs"] += 1
+            return entry["mirror"]
 
-    def unregister_board_watcher(self, board_id: str, mirror: JsonFolderDerivedDict) -> None:
-        with self._watchers_lock:
-            watchers = self._board_watchers.get(board_id)
-            if watchers and mirror in watchers:
-                watchers.remove(mirror)
-            if watchers is not None and not watchers:
-                self._board_watchers.pop(board_id, None)
+    def release_board_mirror(self, board_id: str) -> None:
+        """Ref count down; on the last release, drop the mirror and stop its watcher OUTSIDE the lock
+        (``stop_watching`` joins the observer thread, which can be slow — don't serialize others)."""
+        to_stop = None
+        with self._mirrors_lock:
+            entry = self._board_mirrors.get(board_id)
+            if entry is None:
+                return
+            entry["refs"] -= 1
+            if entry["refs"] <= 0:
+                self._board_mirrors.pop(board_id, None)
+                to_stop = entry["mirror"]
+        if to_stop is not None:
+            to_stop.stop_watching()
 
     def notify_board_changed(self, board_id: str) -> None:
-        """Called right after any write to a board: re-scan its live mirrors and push the diffs to
-        their websockets NOW, without waiting on (or trusting) the filesystem watcher."""
-        with self._watchers_lock:
-            watchers = list(self._board_watchers.get(board_id, []))
-        for mirror in watchers:
+        """Called right after any write to a board: re-scan the board's ONE live mirror and push the
+        diffs to every socket on it NOW, without waiting on (or trusting) the filesystem watcher."""
+        with self._mirrors_lock:
+            entry = self._board_mirrors.get(board_id)
+            mirror = entry["mirror"] if entry else None
+        if mirror is not None:
             try:
                 mirror.resync()
             except Exception as error:                       # a bad mirror must not fail the write

@@ -2,9 +2,17 @@
 
 import pytest
 
-from backend.db.paths import COLUMNS_DIR, PROJECTS_DIR, TAGS_DIR, TASKS_DIR
+from backend.db.paths import COLUMNS_DIR, PROJECTS_DIR, TAGS_DIR, TASKS_DIR, VIEWS_DIR
 from backend.db.seeding import default_project_color
 from tests.conftest import exists, load_json
+
+
+def test_set_view_persists_per_user_filter(board, board_dir):
+    board.set_view("usr_11111111", assignees=["usr_22222222"], tags=["tag_aaaaaaaa"], projects=["ENG"])
+    assert load_json(board_dir, VIEWS_DIR, "usr_11111111") == {
+        "assignees": ["usr_22222222"], "tags": ["tag_aaaaaaaa"], "projects": ["ENG"]}
+    board.set_view("usr_11111111")                                      # empty -> cleared filters
+    assert load_json(board_dir, VIEWS_DIR, "usr_11111111") == {"assignees": [], "tags": [], "projects": []}
 
 
 # ------------------------------------------------------------------ projects + task creation
@@ -29,6 +37,17 @@ def test_create_task_reserves_incrementing_ids_with_assignees(board, board_dir):
     assert load_json(board_dir, TASKS_DIR, "ENG-2")["assignees"] == []
 
 
+def test_task_deadline_stored_cleared_and_validated(board, board_dir):
+    board.create_column("To Do")
+    board.create_project("ENG")
+    board.create_task("ENG", "t", deadline="2026-08-01")
+    assert load_json(board_dir, TASKS_DIR, "ENG-1")["deadline"] == "2026-08-01"
+    board.update_task("ENG-1", "t", "", deadline="")                    # clear it
+    assert load_json(board_dir, TASKS_DIR, "ENG-1")["deadline"] is None
+    with pytest.raises(ValueError):
+        board.create_task("ENG", "bad", deadline="not-a-date")
+
+
 def test_update_task_sets_assignees(board, board_dir):
     board.create_column("To Do")
     board.create_project("ENG")
@@ -47,15 +66,38 @@ def test_create_task_requires_project_and_column(board):
 
 
 # ------------------------------------------------------------------ fractional reorder / move
-def test_move_task_computes_fractional_order(board, board_dir):
+def _lane_order(board_dir, *names):
+    """The given task names sorted by their stored `order` (ascending = top-to-bottom)."""
+    orders = {n: load_json(board_dir, TASKS_DIR, n)["order"] for n in names}
+    return sorted(orders, key=orders.get)
+
+
+def test_move_task_orders_after_anchor(board, board_dir):
     col = board.create_column("To Do")
     board.create_project("ENG")
     board.create_task("ENG", "a")
     board.create_task("ENG", "b")
-    board.create_task("ENG", "c")
-    board.move_task("ENG-1", col, 1)
-    orders = {n: load_json(board_dir, TASKS_DIR, n)["order"] for n in ("ENG-1", "ENG-2", "ENG-3")}
-    assert sorted(orders, key=orders.get)[1] == "ENG-1"
+    board.create_task("ENG", "c")                       # new tasks go to top: order ENG-3<ENG-2<ENG-1
+    board.move_task("ENG-1", col, "ENG-3")              # drop ENG-1 right after ENG-3
+    assert _lane_order(board_dir, "ENG-1", "ENG-2", "ENG-3") == ["ENG-3", "ENG-1", "ENG-2"]
+
+
+def test_move_task_anchor_none_goes_to_top(board, board_dir):
+    col = board.create_column("To Do")
+    board.create_project("ENG")
+    board.create_task("ENG", "a")
+    board.create_task("ENG", "b")
+    board.move_task("ENG-1", col, None)                 # None anchor = top of the column
+    assert _lane_order(board_dir, "ENG-1", "ENG-2")[0] == "ENG-1"
+
+
+def test_move_task_unknown_anchor_goes_to_bottom(board, board_dir):
+    col = board.create_column("To Do")
+    board.create_project("ENG")
+    board.create_task("ENG", "a")
+    board.create_task("ENG", "b")                       # ENG-2 on top, ENG-1 below
+    board.move_task("ENG-2", col, "ENG-404")            # stale/absent anchor = bottom of the lane
+    assert _lane_order(board_dir, "ENG-1", "ENG-2")[-1] == "ENG-2"
 
 
 def test_move_task_between_columns(board, board_dir):
@@ -63,7 +105,7 @@ def test_move_task_between_columns(board, board_dir):
     col2 = board.create_column("Done")
     board.create_project("ENG")
     board.create_task("ENG", "a")
-    board.move_task("ENG-1", col2, 0)
+    board.move_task("ENG-1", col2, None)
     assert load_json(board_dir, TASKS_DIR, "ENG-1")["status"] == col2
 
 

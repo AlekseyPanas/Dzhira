@@ -108,12 +108,28 @@ button { font-family: inherit; cursor: pointer; }
     box-shadow: 2px 2px 0 rgba(0, 0, 0, 0.35);
 }
 
+// deadline chip: red past-due, yellow due-soon, grey later (colour set by the frontend vs local today)
+.deadline-chip {
+    display: inline-block;
+    padding: 1px 9px;
+    margin: 2px 3px 0 0;
+    border: 2.5px solid var(--ink);
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 700;
+    box-shadow: 2px 2px 0 rgba(0, 0, 0, 0.35);
+    white-space: nowrap;
+}
+.deadline-chip.past { background-color: #ff5c5c; color: #fff; }
+.deadline-chip.soon { background-color: #ffd23f; color: #101010; }
+.deadline-chip.later { background-color: #dcdcdc; color: #101010; }
+
 // ------------------------------------------------------------------ the board
 .board {
     display: flex;
     align-items: flex-start;
     gap: 20px;
-    padding: 24px 20px;
+    padding: 24px 20px 120px;               // bottom room so the fixed filter bar never covers a card
     overflow-x: auto;
     min-height: 70vh;
 }
@@ -412,6 +428,7 @@ button:disabled { opacity: 0.4; cursor: default; }
 // ------------------------------------------------------------------ assignees
 .assignee-stack { display: inline-flex; align-items: center; gap: 2px; }
 .assignee-circle.small { width: 20px; height: 20px; font-size: 11px; border-width: 2px; }
+.assignee-circle.small.unassigned { background: #e6e6e6; color: #777; }
 .assignee-pick {
     display: inline-flex; align-items: center; gap: 6px;
     background: #fff; border: 2.5px solid var(--ink); border-radius: 20px;
@@ -420,3 +437,31 @@ button:disabled { opacity: 0.4; cursor: default; }
 .assignee-pick.on { box-shadow: 3px 3px 0 rgba(0, 0, 0, 0.35); transform: rotate(-1deg); background: var(--lime); }
 .assignee-pick.off { opacity: 0.8; }
 .danger-zone { margin-top: 10px; }
+
+// ------------------------------------------------------------------ filter bar (per-user view)
+.filter-bar {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+    padding: 8px 14px;
+    background: rgba(255, 255, 255, 0.96);
+    border-top: 4px solid var(--ink);
+    box-shadow: 0 -4px 0 rgba(0, 0, 0, 0.15);
+    max-height: 42vh; overflow-y: auto;
+    font-family: inherit;
+}
+.filter-bar.active { background: #fffbe0; }
+.filter-label { font-weight: 900; font-size: 14px; }
+.filter-group { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+.filter-group-label { font-size: 11px; font-weight: 900; text-transform: uppercase; color: #888; }
+.filter-chip {
+    display: inline-flex; align-items: center; gap: 5px;
+    background: #fff; border: 2.5px solid var(--ink); border-radius: 20px;
+    padding: 2px 10px 2px 4px; font-family: inherit; font-size: 12px; font-weight: 700; cursor: pointer;
+}
+// Selected: a solid dark fill so it clearly reads as "on". Tag chips set their own colour inline
+// (which wins over this), so they keep showing their tag colour; who/project/unassigned get this.
+.filter-chip.on {
+    background: var(--ink); color: #fff;
+    box-shadow: 3px 3px 0 rgba(0, 0, 0, 0.35); transform: rotate(-1deg);
+}
+.filter-clear { padding: 4px 12px; }

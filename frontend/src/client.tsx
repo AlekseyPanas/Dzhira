@@ -9,7 +9,8 @@
 
 import Nano, { h } from "nano-jsx";
 import { authApi, boardsApi } from "./api";
-import { authFrame, routeFrame } from "./frames/shared_frames";
+import { authFrame, nowFrame, routeFrame } from "./frames/shared_frames";
+import { todayLocal } from "./model";
 import { installDragController } from "./drag_controller";
 import { initBoardSession } from "./board_session";
 import { boardPath, currentRoute, initRouter, navigate } from "./router";
@@ -37,6 +38,8 @@ async function boot(): Promise<void> {
     applyTheme("paint");                                    // force paint; the switcher is hidden
     initRouter();
     installDragController();
+    nowFrame.write("today", todayLocal());                  // deadline-chip clock; tick over midnight
+    setInterval(() => nowFrame.write("today", todayLocal()), 60_000);
     authFrame.subscribe("", renderApp);                    // re-render the app on login / logout
     routeFrame.subscribe("", renderApp);                   // ...and on navigation
     renderApp();

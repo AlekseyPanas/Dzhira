@@ -17,7 +17,7 @@ import { bindFrames } from "../frames/bind_frames";
 interface TaskEditorProps { taskId?: string; }
 
 export class TaskEditor extends Component<TaskEditorProps> {
-    private draft: { title: string; description: string; tags: string[]; projectCode: string; assignees: string[] };
+    private draft: { title: string; description: string; tags: string[]; projectCode: string; assignees: string[]; deadline: string };
     private error: string | null = null;
 
     constructor(props: TaskEditorProps) {
@@ -29,6 +29,7 @@ export class TaskEditor extends Component<TaskEditorProps> {
             tags: [...(existing?.tags ?? [])],
             projectCode: projectCodes()[0] ?? "",
             assignees: [...(existing?.assignees ?? [])],
+            deadline: existing?.deadline ?? "",
         };
         bindFrames(this, [boardFrame, boardMetaFrame]);
     }
@@ -52,10 +53,11 @@ export class TaskEditor extends Component<TaskEditorProps> {
     }
 
     private async save(): Promise<void> {
-        const { title, description, tags, projectCode, assignees } = this.draft;
+        const { title, description, tags, projectCode, assignees, deadline } = this.draft;
+        const dueDate = deadline || null;
         const error = this.isEdit()
-            ? await taskApi.update(this.props.taskId!, title, description, tags, assignees)
-            : await taskApi.create(projectCode, title, description, tags, assignees);
+            ? await taskApi.update(this.props.taskId!, title, description, tags, assignees, dueDate)
+            : await taskApi.create(projectCode, title, description, tags, assignees, dueDate);
         if (error) { this.error = error; this.update(); return; }
         closePopup();
     }
@@ -95,6 +97,10 @@ export class TaskEditor extends Component<TaskEditorProps> {
                           onInput={(e: any) => { this.draft.description = e.target.value; }}>
                     {this.draft.description}
                 </textarea>
+
+                <label class="field-label">Deadline <span class="muted">(optional)</span></label>
+                <input class="text-input" type="date" value={this.draft.deadline}
+                       onInput={(e: any) => { this.draft.deadline = e.target.value; }} />
 
                 {editing
                     ? <div class="field-label">Project&nbsp;

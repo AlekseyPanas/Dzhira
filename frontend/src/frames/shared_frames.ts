@@ -11,6 +11,10 @@ import { SyncedClientFrame } from "./synced_client_frame";
 
 export const authFrame = new LocalClientFrame({ user: null });
 export const routeFrame = new LocalClientFrame({ path: location.pathname });
+// The viewer's LOCAL "today" (YYYY-MM-DD), used to colour deadline chips. Ticked client-side (see
+// client.tsx) so chips recolour across midnight without a refresh. Deliberately NOT backend-synced —
+// each viewer compares against their own clock/timezone.
+export const nowFrame = new LocalClientFrame({ today: "" });
 export const boardFrame = new SyncedClientFrame();   // <- board.json + columns/tags/projects/tasks
 export const boardMetaFrame = new LocalClientFrame({ name: "", id: "", members: [], myRole: null });
 

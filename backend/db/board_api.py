@@ -10,13 +10,26 @@ whatever ids it's given — validating them against the board's membership is th
 the boards store). The single global "assignee" of the pre-accounts app is gone.
 """
 
+from datetime import date
 from pathlib import Path
 from typing import Dict, List, Optional, Union
 
 from backend.db import ids
 from backend.db.jsonstore import atomic_write_json, locked_read_modify_write, read_json
-from backend.db.paths import COLUMNS_DIR, ORDER_STEP, PROJECTS_DIR, TAGS_DIR, TASKS_DIR
+from backend.db.paths import COLUMNS_DIR, ORDER_STEP, PROJECTS_DIR, TAGS_DIR, TASKS_DIR, VIEWS_DIR
 from backend.db.seeding import default_project_color
+
+
+def _clean_deadline(deadline: Optional[str]) -> Optional[str]:
+    """None/empty -> None; otherwise validate an ISO calendar date ('YYYY-MM-DD') and return it
+    normalized. Date-only (no time) — the chip is a calendar date and "now" is the viewer's local
+    date, so timezones never enter into it."""
+    if deadline is None or str(deadline).strip() == "":
+        return None
+    try:
+        return date.fromisoformat(str(deadline)).isoformat()
+    except ValueError:
+        raise ValueError(f"Deadline must be a date like 2026-07-30, not '{deadline}'.")
 
 
 class BoardAPI:
@@ -29,7 +42,8 @@ class BoardAPI:
     # ==============================================================================================
     def create_task(self, project_code: str, title: str, description: str = "",
                      tags: Optional[List[str]] = None,
-                     assignees: Optional[List[str]] = None) -> str:
+                     assignees: Optional[List[str]] = None,
+                     deadline: Optional[str] = None) -> str:
         """Reserve the next id for ``project_code`` and create the task at the TOP of the leftmost
         column. Returns the new task id (e.g. ``ENG-4``)."""
         code = ids.normalize_project_code(project_code)
@@ -48,22 +62,26 @@ class BoardAPI:
             "status": status_id,
             "order": order,
             "assignees": list(assignees or []),
+            "deadline": _clean_deadline(deadline),
         })
         return task_id
 
     def update_task(self, task_id: str, title: str, description: str,
                     tags: Optional[List[str]] = None,
-                    assignees: Optional[List[str]] = None) -> None:
-        """Edit a task's content (title / description / tags / assignees). Status + order are
-        board-positional and change only via ``move_task``; the id is immutable."""
+                    assignees: Optional[List[str]] = None,
+                    deadline: Optional[str] = None) -> None:
+        """Edit a task's content (title / description / tags / assignees / deadline). Status + order
+        are board-positional and change only via ``move_task``; the id is immutable."""
         ids.validate_task_id(task_id)
         clean_tags = self._validate_tags(tags or [])
+        clean_deadline = _clean_deadline(deadline)
 
         def mutate(task: dict) -> None:
             task["title"] = str(title)
             task["description"] = str(description)
             task["tags"] = clean_tags
             task["assignees"] = list(assignees or [])
+            task["deadline"] = clean_deadline
 
         locked_read_modify_write(self._task_path(task_id), mutate)
 
@@ -74,9 +92,12 @@ class BoardAPI:
             raise ValueError(f"Task '{task_id}' does not exist.")
         path.unlink()
 
-    def move_task(self, task_id: str, status_id: str, index: int) -> None:
-        """Drag-and-drop: place ``task_id`` into column ``status_id`` at ``index`` (0 = top). Computes
-        a fractional ``order`` between the neighbors there, rebalancing the lane only if it collapses."""
+    def move_task(self, task_id: str, status_id: str, after_task_id: Optional[str]) -> None:
+        """Drag-and-drop: place ``task_id`` in column ``status_id`` immediately AFTER ``after_task_id``
+        (an existing task in that column), or at the TOP when it's ``None``. Anchoring to a task rather
+        than a numeric index is what makes reordering work under a FILTER: the client passes the visible
+        task the card was dropped below, and we position relative to it in the FULL lane (hidden tasks
+        around it keep their places). Computes a fractional order, rebalancing only if the gap collapses."""
         ids.validate_task_id(task_id)
         ids.validate_generated_id(status_id, "column")
         self._require_column(status_id)
@@ -85,7 +106,13 @@ class BoardAPI:
 
         lane = [task for task in self._tasks_in_column(status_id) if task["id"] != task_id]
         lane.sort(key=lambda task: task["order"])
-        index = max(0, min(int(index), len(lane)))
+        # anchor -> insertion index in the full lane: None = top; just past a found anchor; an
+        # unknown/stale anchor (e.g. moved to another column meanwhile) = bottom.
+        if after_task_id is None:
+            index = 0
+        else:
+            position = next((i for i, task in enumerate(lane) if task["id"] == after_task_id), None)
+            index = (position + 1) if position is not None else len(lane)
 
         left = lane[index - 1]["order"] if index > 0 else None
         right = lane[index]["order"] if index < len(lane) else None
@@ -221,6 +248,25 @@ class BoardAPI:
         for task in self._tasks_for_project(code):
             self._task_path(task["id"]).unlink(missing_ok=True)
         path.unlink()
+
+    # ==============================================================================================
+    #  Views (per-user filter preferences — assignee / tags / projects)
+    # ==============================================================================================
+    def set_view(self, user_id: str, assignees: Optional[List[str]] = None,
+                 tags: Optional[List[str]] = None, projects: Optional[List[str]] = None) -> None:
+        """Persist a user's filter preference for THIS board (``views/<user_id>.json``). Stored as-is
+        (lists of ids/codes); the frontend applies it and simply ignores any stale entry. The whole
+        board — everyone's views included — is in the derived dict, so a change syncs to all sockets;
+        each client only cares about its own."""
+        view = {
+            "assignees": [a for a in (assignees or []) if isinstance(a, str)],
+            "tags": [t for t in (tags or []) if isinstance(t, str)],
+            "projects": [p for p in (projects or []) if isinstance(p, str)],
+        }
+        self._atomic_write(self._view_path(user_id), view)
+
+    def _view_path(self, user_id: str) -> Path:
+        return self._root / VIEWS_DIR / f"{ids.validate_generated_id(user_id, 'user')}.json"
 
     # ==============================================================================================
     #  Internal queries

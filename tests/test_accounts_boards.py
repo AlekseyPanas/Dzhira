@@ -107,6 +107,23 @@ def test_invite_flow(services):
     assert not services.invites_for_user(guest)            # invite consumed
 
 
+def test_shared_board_mirror_is_refcounted(services):
+    owner = services.accounts.register("Owner", "pw")
+    board = services.boards.create_board("Alpha", owner["id"])
+    bid = board["id"]
+    try:
+        first = services.acquire_board_mirror(bid)
+        second = services.acquire_board_mirror(bid)
+        assert first is second                              # both sockets share ONE mirror
+        assert services._board_mirrors[bid]["refs"] == 2
+        services.release_board_mirror(bid)
+        assert services._board_mirrors[bid]["refs"] == 1
+        services.release_board_mirror(bid)
+        assert bid not in services._board_mirrors           # dropped + watcher stopped on last release
+    finally:
+        services._board_mirrors.pop(bid, None)
+
+
 def test_cannot_invite_self_or_existing_member(services):
     owner = services.accounts.register("Owner", "pw")
     board = services.boards.create_board("Alpha", owner["id"])

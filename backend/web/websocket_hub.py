@@ -19,7 +19,6 @@ from typing import Dict
 
 from fastapi import WebSocket, WebSocketDisconnect
 
-from backend.db import paths
 from backend.derived.json_folder_derived_dict import JsonFolderDerivedDict
 from backend.derived.pub_sub_derived_dict import SubHandle, Update
 from backend.services import AppServices
@@ -47,9 +46,7 @@ class WebsocketHub:
             await websocket.close()
             return
 
-        board_dict = JsonFolderDerivedDict(paths.board_dir(self._services.root, board["id"]))
-        board_dict.start_watching()
-        self._services.register_board_watcher(board["id"], board_dict)   # for in-process write pokes
+        board_dict = self._services.acquire_board_mirror(board["id"])    # shared, ref-counted mirror
 
         event_loop = asyncio.get_running_loop()
         outbound_frames: asyncio.Queue = asyncio.Queue()
@@ -80,10 +77,9 @@ class WebsocketHub:
             warn(f"Websocket connection failed: {error!r}")
         finally:
             sender_task.cancel()
-            self._services.unregister_board_watcher(board["id"], board_dict)
             for handle in live_subscriptions.values():
                 board_dict.unsubscribe(handle)
-            board_dict.stop_watching()                      # free the per-connection watcher
+            self._services.release_board_mirror(board["id"])   # ref--; stops the watcher on the last
 
     @staticmethod
     def _subscribe(board_dict: JsonFolderDerivedDict, message: dict,

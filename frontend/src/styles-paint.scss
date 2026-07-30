@@ -49,8 +49,8 @@ $paint-ink: #141414;
     // ---- the rough-outline set: hide the crisp border/shadow, draw a filtered outline on top -----
     // (NOT .theme-switcher — it is position:fixed and must stay put; only its buttons get roughened.)
     .task-card, .board-column, .column-header, .column-count, .crayon-btn, .mini-btn, .add-column,
-    .modal-box, .modal-titlebar, .tag-chip, .assignee-circle, .assignee-button, .card-id,
-    .list-row, .theme-btn, .auth-card, .dropdown, .assignee-pick {
+    .modal-box, .modal-titlebar, .tag-chip, .deadline-chip, .assignee-circle, .assignee-button,
+    .card-id, .list-row, .theme-btn, .auth-card, .dropdown, .assignee-pick, .filter-chip {
         border: none !important;
         box-shadow: none !important;
         position: relative;
@@ -99,7 +99,7 @@ $paint-ink: #141414;
     // (3) the "badly coloured in Paint" fill on the colour-bearing bits. These carry an inline
     // background-COLOR (not the shorthand), so this background-IMAGE layers on top — colour in the
     // gaps, pale streaks where the brush skipped — and stays behind the text, so labels stay legible.
-    .card-stripe, .card-id, .tag-chip, .assignee-circle { @include bad-paint-fill; }
+    .card-stripe, .card-id, .tag-chip, .deadline-chip, .assignee-circle { @include bad-paint-fill; }
 }
 
 // the plain off-white canvas with a faint grey brush texture (no rainbow). Set on BODY, since the

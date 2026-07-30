@@ -70,13 +70,14 @@ export const invitesApi = {
 
 // ---- board content (carry the active board id) ----------------------------------------------
 export const taskApi = {
-    create: (projectCode: string, title: string, description: string, tags: string[], assignees: string[]) =>
-        postAck("/api/task/create", { board_id: activeBoardId, project_code: projectCode, title, description, tags, assignees }),
-    update: (taskId: string, title: string, description: string, tags: string[], assignees: string[]) =>
-        postAck("/api/task/update", { board_id: activeBoardId, task_id: taskId, title, description, tags, assignees }),
+    create: (projectCode: string, title: string, description: string, tags: string[], assignees: string[], deadline: string | null) =>
+        postAck("/api/task/create", { board_id: activeBoardId, project_code: projectCode, title, description, tags, assignees, deadline }),
+    update: (taskId: string, title: string, description: string, tags: string[], assignees: string[], deadline: string | null) =>
+        postAck("/api/task/update", { board_id: activeBoardId, task_id: taskId, title, description, tags, assignees, deadline }),
     delete: (taskId: string) => postAck("/api/task/delete", { board_id: activeBoardId, task_id: taskId }),
-    move: (taskId: string, statusId: string, index: number) =>
-        postAck("/api/task/move", { board_id: activeBoardId, task_id: taskId, status_id: statusId, index }),
+    // afterTaskId = the visible task to drop after (null = top of the column); filter-safe ordering.
+    move: (taskId: string, statusId: string, afterTaskId: string | null) =>
+        postAck("/api/task/move", { board_id: activeBoardId, task_id: taskId, status_id: statusId, after_task_id: afterTaskId }),
 };
 
 export const columnApi = {
@@ -97,4 +98,10 @@ export const projectApi = {
     rename: (code: string, newCode: string) => postAck("/api/project/rename", { board_id: activeBoardId, code, new_code: newCode }),
     setColor: (code: string, color: string) => postAck("/api/project/set_color", { board_id: activeBoardId, code, color }),
     delete: (code: string) => postAck("/api/project/delete", { board_id: activeBoardId, code }),
+};
+
+// per-user filter view (assignee / tags / projects) — persisted per board, synced via the mirror
+export const viewApi = {
+    set: (assignees: string[], tags: string[], projects: string[]) =>
+        postAck("/api/view/set", { board_id: activeBoardId, assignees, tags, projects }),
 };

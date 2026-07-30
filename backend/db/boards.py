@@ -95,11 +95,13 @@ class BoardsStore:
         locked_read_modify_write(self._board_dir(board_id) / paths.BOARD_FILE, mutate)
 
     def kick_member(self, board_id: str, user_id: str) -> None:
-        """Remove a member from the board AND from every task they're assigned to in it."""
+        """Remove a member from the board, from every task they're assigned to, and drop their saved
+        filter view."""
         def mutate(board: dict) -> None:
             board["members"] = [uid for uid in board.get("members", []) if uid != user_id]
         locked_read_modify_write(self._board_dir(board_id) / paths.BOARD_FILE, mutate)
         self._strip_assignee_from_tasks(board_id, user_id)
+        (self._board_dir(board_id) / paths.VIEWS_DIR / f"{user_id}.json").unlink(missing_ok=True)
 
     def transfer_ownership(self, board_id: str, new_owner_id: str) -> None:
         """Hand the board to an existing member; the old owner becomes a plain member."""

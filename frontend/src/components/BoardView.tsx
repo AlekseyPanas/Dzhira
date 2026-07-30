@@ -3,6 +3,7 @@
 
 import Nano, { Component, h } from "nano-jsx";
 import { Board } from "./Board";
+import { FilterBar } from "./FilterBar";
 import { Popups } from "./Popups";
 import { Topbar } from "./Topbar";
 
@@ -16,6 +17,7 @@ export class BoardView extends Component {
                 <Topbar />
                 <Board />
                 <Popups />
+                <FilterBar />
             </div>
         );
     }

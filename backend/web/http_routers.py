@@ -67,6 +67,7 @@ class CreateTaskBody(BaseModel):
     description: str = ""
     tags: List[str] = []
     assignees: List[str] = []
+    deadline: Optional[str] = None
 
 
 class UpdateTaskBody(BaseModel):
@@ -76,6 +77,7 @@ class UpdateTaskBody(BaseModel):
     description: str = ""
     tags: List[str] = []
     assignees: List[str] = []
+    deadline: Optional[str] = None
 
 
 class TaskIdBody(BaseModel):
@@ -87,7 +89,7 @@ class MoveTaskBody(BaseModel):
     board_id: str
     task_id: str
     status_id: str
-    index: int
+    after_task_id: Optional[str] = None                     # anchor: place just after this task; None = top
 
 
 class ColumnCreateBody(BaseModel):
@@ -151,6 +153,13 @@ class ProjectColorBody(BaseModel):
 class ProjectCodeBody(BaseModel):
     board_id: str
     code: str
+
+
+class SetViewBody(BaseModel):
+    board_id: str
+    assignees: List[str] = []
+    tags: List[str] = []
+    projects: List[str] = []
 
 
 # ------------------------------------------------------------------ router
@@ -305,7 +314,8 @@ def build_api_router(services: AppServices) -> APIRouter:
         api = services.board_api(board["id"])
         assignees = services.valid_assignees(board, body.assignees)
         return acked_board(board, lambda: api.create_task(body.project_code, body.title,
-                                                          body.description, body.tags, assignees))
+                                                          body.description, body.tags, assignees,
+                                                          body.deadline))
 
     @router.post("/task/update")
     def task_update(body: UpdateTaskBody, user: dict = Depends(require_login)):
@@ -313,7 +323,8 @@ def build_api_router(services: AppServices) -> APIRouter:
         api = services.board_api(board["id"])
         assignees = services.valid_assignees(board, body.assignees)
         return acked_board(board, lambda: api.update_task(body.task_id, body.title,
-                                                          body.description, body.tags, assignees))
+                                                          body.description, body.tags, assignees,
+                                                          body.deadline))
 
     @router.post("/task/delete")
     def task_delete(body: TaskIdBody, user: dict = Depends(require_login)):
@@ -324,7 +335,7 @@ def build_api_router(services: AppServices) -> APIRouter:
     def task_move(body: MoveTaskBody, user: dict = Depends(require_login)):
         board = require_board(user, body.board_id)
         return acked_board(board, lambda: services.board_api(board["id"]).move_task(
-            body.task_id, body.status_id, body.index))
+            body.task_id, body.status_id, body.after_task_id))
 
     @router.post("/column/create")
     def column_create(body: ColumnCreateBody, user: dict = Depends(require_login)):
@@ -380,5 +391,12 @@ def build_api_router(services: AppServices) -> APIRouter:
     def project_delete(body: ProjectCodeBody, user: dict = Depends(require_login)):
         board = require_board(user, body.board_id)
         return acked_board(board, lambda: services.board_api(board["id"]).delete_project(body.code))
+
+    # ================================================================ per-user view (filters)
+    @router.post("/view/set")
+    def view_set(body: SetViewBody, user: dict = Depends(require_login)):
+        board = require_board(user, body.board_id)
+        return acked_board(board, lambda: services.board_api(board["id"]).set_view(
+            user["id"], body.assignees, body.tags, body.projects))
 
     return router

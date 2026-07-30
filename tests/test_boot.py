@@ -55,6 +55,24 @@ def test_http_write_pushes_update_over_ws(tmp_path):
             assert frame["op"] == "update" and frame["key_path"].startswith("columns/")
 
 
+def test_two_sockets_on_one_board_both_get_the_update(tmp_path):
+    # The shared-mirror refactor: two connections to the same board share one mirror, and a single
+    # write broadcasts to both.
+    with _client(tmp_path) as client:
+        client.post("/api/auth/register", json={"username": "Bob", "password": "pw"})
+        client.post("/api/boards/create", json={"name": "MyBoard"})
+        board_id = client.get("/api/boards").json()["boards"][0]["id"]
+        headers = _cookie_header(client)
+        with client.websocket_connect("/ws?board=MyBoard", headers=headers) as ws1, \
+                client.websocket_connect("/ws?board=MyBoard", headers=headers) as ws2:
+            for ws in (ws1, ws2):
+                ws.send_json({"op": "subscribe", "sub_id": "s", "key_path": "columns"})
+                assert ws.receive_json()["op"] == "subscribed"
+            client.post("/api/column/create", json={"board_id": board_id, "name": "Shared"})
+            assert ws1.receive_json()["op"] == "update"
+            assert ws2.receive_json()["op"] == "update"
+
+
 def test_ws_requires_auth_and_access(tmp_path):
     with _client(tmp_path) as client:
         # no cookie at all -> unauthorized

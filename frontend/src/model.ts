@@ -2,7 +2,7 @@
 // boardFrame (websocket-synced). The MEMBER list (id -> username/color/role) lives in boardMetaFrame,
 // fetched via API. Components re-render (bindFrames) when either changes.
 
-import { boardFrame, boardMetaFrame } from "./frames/shared_frames";
+import { authFrame, boardFrame, boardMetaFrame, nowFrame } from "./frames/shared_frames";
 import { DELETED } from "./key_paths";
 
 export interface Column { id: string; name: string; order: number; }
@@ -10,6 +10,7 @@ export interface Tag { id: string; name: string; color: string; }
 export interface Task {
     id: string; title: string; description: string;
     tags: string[]; status: string; order: number; assignees: string[];
+    deadline?: string | null;
 }
 export interface Project { code: string; color: string; }
 export interface Member { id: string; username: string; color: string; role: string; }
@@ -86,6 +87,44 @@ export function boardName(): string {
     return typeof name === "string" ? name : "";
 }
 
+// ---- per-user filters (views) ---------------------------------------------------------------
+export interface View { assignees: string[]; tags: string[]; projects: string[]; }
+
+// A sentinel that can appear in view.assignees to explicitly filter for tasks with NO assignee. It's
+// safe to store alongside real ids: user ids are "usr_…", so this can never collide with one.
+export const UNASSIGNED = "__none__";
+
+export function myUserId(): string {
+    const user = authFrame.read("user");
+    return user && typeof user === "object" ? user.id : "";
+}
+
+/** This viewer's saved filter for the current board (from the board mirror), or an empty filter. */
+export function myView(): View {
+    const raw = boardFrame.read(`views/${myUserId()}.json`);
+    if (raw === DELETED || raw === null || typeof raw !== "object") {
+        return { assignees: [], tags: [], projects: [] };
+    }
+    return { assignees: raw.assignees ?? [], tags: raw.tags ?? [], projects: raw.projects ?? [] };
+}
+
+export function filtersActive(view: View = myView()): boolean {
+    return view.assignees.length > 0 || view.tags.length > 0 || view.projects.length > 0;
+}
+
+/** Within a category any-of-selected (OR); across categories all must pass (AND); empty = no filter.
+ *  The assignee category also honours the UNASSIGNED sentinel: it matches tasks with no assignee. */
+export function taskPassesView(task: Task, view: View): boolean {
+    if (view.assignees.length) {
+        const matchesMember = task.assignees.some((a) => view.assignees.includes(a));
+        const matchesUnassigned = view.assignees.includes(UNASSIGNED) && task.assignees.length === 0;
+        if (!matchesMember && !matchesUnassigned) return false;
+    }
+    if (view.tags.length && !task.tags.some((t) => view.tags.includes(t))) return false;
+    if (view.projects.length && !view.projects.includes(projectOf(task.id))) return false;
+    return true;
+}
+
 // ---- small view helpers ---------------------------------------------------------------------
 export function contrastInk(hexColor: string): string {
     const hex = (hexColor || "#000000").replace("#", "");
@@ -100,4 +139,38 @@ export function firstInitial(name: string): string {
 }
 export function projectOf(taskId: string): string {
     return taskId.split("-", 1)[0]!;
+}
+
+// ---- deadlines ------------------------------------------------------------------------------
+export const DEADLINE_SOON_DAYS = 3;
+
+function isoDate(d: Date): string {
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+/** The viewer's LOCAL calendar date, YYYY-MM-DD. */
+export function todayLocal(): string {
+    return isoDate(new Date());
+}
+
+function addDays(iso: string, days: number): string {
+    const d = new Date(`${iso}T00:00:00`);
+    d.setDate(d.getDate() + days);
+    return isoDate(d);
+}
+
+/** Colour bucket for a deadline vs the viewer's local today (from nowFrame): overdue / due-soon /
+ *  later. ISO date strings order correctly with `<`, so no Date parsing needed for the comparison. */
+export function deadlineStatus(deadline?: string | null): "past" | "soon" | "later" | null {
+    if (!deadline) return null;
+    const today = (nowFrame.read("today") as string) || todayLocal();
+    if (deadline < today) return "past";
+    if (deadline <= addDays(today, DEADLINE_SOON_DAYS)) return "soon";
+    return "later";
+}
+
+/** A short human date for the chip, e.g. "Aug 1". */
+export function formatDeadline(deadline: string): string {
+    return new Date(`${deadline}T00:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }

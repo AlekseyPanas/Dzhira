@@ -30,7 +30,8 @@ COLUMNS_DIR = "columns"
 TAGS_DIR = "tags"
 PROJECTS_DIR = "projects"
 TASKS_DIR = "tasks"
-BOARD_SUBFOLDERS = (COLUMNS_DIR, TAGS_DIR, PROJECTS_DIR, TASKS_DIR)
+VIEWS_DIR = "views"        # per-user filter preferences: views/<user_id>.json (in the board mirror)
+BOARD_SUBFOLDERS = (COLUMNS_DIR, TAGS_DIR, PROJECTS_DIR, TASKS_DIR, VIEWS_DIR)
 
 # Spacing between freshly-created siblings' fractional order values (see the ordering model).
 ORDER_STEP = 1000.0

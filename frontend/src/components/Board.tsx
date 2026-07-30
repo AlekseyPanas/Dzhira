@@ -5,14 +5,14 @@
 
 import Nano, { Component, h } from "nano-jsx";
 import { columnApi } from "../api";
-import { boardFrame, boardMetaFrame } from "../frames/shared_frames";
+import { boardFrame, boardMetaFrame, nowFrame } from "../frames/shared_frames";
 import { bindFrames } from "../frames/bind_frames";
-import { columnsSorted, tasksInColumn, type Column } from "../model";
+import { columnsSorted, filtersActive, myView, tasksInColumn, taskPassesView, type Column, type View } from "../model";
 import { askConfirm } from "../ui";
 import { presentIf } from "./shared_widgets";
 import { TaskCard } from "./TaskCard";
 
-interface ColumnProps { column: Column; isFirst: boolean; isLast: boolean; isOnly: boolean; }
+interface ColumnProps { column: Column; isFirst: boolean; isLast: boolean; isOnly: boolean; view: View; filtering: boolean; }
 
 class ColumnView extends Component<ColumnProps> {
     private editingName = false;
@@ -39,8 +39,8 @@ class ColumnView extends Component<ColumnProps> {
     }
 
     override render() {
-        const { column, isFirst, isLast, isOnly } = this.props;
-        const tasks = tasksInColumn(column.id);
+        const { column, isFirst, isLast, isOnly, view, filtering } = this.props;
+        const tasks = tasksInColumn(column.id).filter((task) => taskPassesView(task, view));
         return (
             <div class="board-column">
                 <div class="column-header">
@@ -68,7 +68,7 @@ class ColumnView extends Component<ColumnProps> {
                 </div>
                 <div class="column-tasks" data-column-id={column.id}>
                     {tasks.length === 0
-                        ? <div class="column-empty">no tasks — drag one here</div>
+                        ? <div class="column-empty">{filtering ? "no matching tasks" : "no tasks — drag one here"}</div>
                         : tasks.map((task) => <TaskCard task={task} />)}
                 </div>
             </div>
@@ -79,11 +79,13 @@ class ColumnView extends Component<ColumnProps> {
 export class Board extends Component {
     constructor(props: any) {
         super(props);
-        bindFrames(this, [boardFrame, boardMetaFrame]);   // re-render on content AND member changes
+        bindFrames(this, [boardFrame, boardMetaFrame, nowFrame]);   // content, members, and the clock
     }
 
     override render() {
         const columns = columnsSorted();
+        const view = myView();
+        const filtering = filtersActive(view);              // only affects the empty-column placeholder text
         return (
             <div class="board">
                 {columns.length === 0
@@ -91,7 +93,7 @@ export class Board extends Component {
                     : columns.map((column, index) => (
                           <ColumnView column={column} isFirst={index === 0}
                                       isLast={index === columns.length - 1}
-                                      isOnly={columns.length === 1} />))}
+                                      isOnly={columns.length === 1} view={view} filtering={filtering} />))}
                 <button class="add-column" title="add a status column"
                         onClick={() => void columnApi.create("new column")}>
                     ＋<br />column
