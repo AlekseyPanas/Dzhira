@@ -111,6 +111,30 @@ def test_watchdog_observer_end_to_end(tmp_path):
         dd.stop_watching()
 
 
+def test_resync_publishes_adds_updates_and_deletes_without_watchdog(tmp_path):
+    # The in-process poke path (used when the app writes): no observer running at all here.
+    (tmp_path / "tasks").mkdir()
+    _write(tmp_path / "tasks" / "ENG-1.json", {"id": "ENG-1", "status": "todo"})
+    dd = JsonFolderDerivedDict(tmp_path)
+    dd._scan_subtree(tmp_path)
+    dd._drain_pending_updates()
+
+    received = []
+    dd.subscribe("", lambda update: received.append((update.key_path, update.value)))
+
+    _write(tmp_path / "tasks" / "ENG-2.json", {"id": "ENG-2"})               # add
+    _write(tmp_path / "tasks" / "ENG-1.json", {"id": "ENG-1", "status": "done"})   # update
+    dd.resync()
+    got = dict(received)
+    assert got["tasks/ENG-2.json"] == {"id": "ENG-2"}
+    assert got["tasks/ENG-1.json/status"] == "done"
+
+    received.clear()
+    (tmp_path / "tasks" / "ENG-2.json").unlink()                             # delete
+    dd.resync()
+    assert ("tasks/ENG-2.json", DELETED) in received
+
+
 def test_watchdog_survives_atomic_replace_over_existing_file(tmp_path):
     # Regression: an atomic save (temp + os.replace) OVER an existing file must UPDATE the mirror,
     # not drop the entry — on macOS FSEvents this fires a spurious 'deleted' for the live path.

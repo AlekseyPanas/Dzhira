@@ -55,13 +55,23 @@ class JsonFolderDerivedDict(APubSubDerivedDict):
 
     # ------------------------------------------------------------------ lifecycle
     def start_watching(self) -> None:
-        """Start the observer, THEN scan the folder in (see the module docstring on ordering)."""
+        """Start the observer (best-effort), THEN scan the folder in. A FAILED observer is NOT fatal:
+        inotify can refuse (per-user instance limit exhausted by per-connection churn, unsupported
+        filesystem, …). We log and carry on — the initial snapshot is still built from disk below, and
+        app-driven live updates come via ``resync`` regardless. Only external hand-edits would then be
+        missed until the next write/refresh."""
         if self._observer is not None:
             return
-        self._observer = Observer()
-        self._observer.schedule(_FolderEventForwarder(self), str(self._root_folder), recursive=True)
-        self._observer.start()
-        self._scan_subtree(self._root_folder)
+        try:
+            observer = Observer()
+            observer.schedule(_FolderEventForwarder(self), str(self._root_folder), recursive=True)
+            observer.start()
+            self._observer = observer
+        except Exception as error:
+            warn(f"Watchdog observer failed for '{self._root_folder}': {error!r}. Live external-edit "
+                 f"updates are off; app writes still propagate via resync.")
+            self._observer = None
+        self._scan_subtree(self._root_folder)               # snapshot from disk either way
         self._drain_pending_updates()
 
     def stop_watching(self) -> None:
@@ -143,6 +153,54 @@ class JsonFolderDerivedDict(APubSubDerivedDict):
             if existed:
                 self._publish(rel_path, DELETED)
         self._drain_pending_updates()
+
+    # ------------------------------------------------------------------ in-process resync
+    def resync(self) -> None:
+        """Re-read the WHOLE folder now and publish every diff vs the mirror (adds, updates, AND
+        deletions). This is the in-process fast path the app calls right after it writes, so live
+        updates never depend on watchdog/inotify actually firing (which is flaky on servers —
+        containers/overlayfs, inotify instance limits, per-connection observer churn). Cheap for a
+        small board; safe to call concurrently with the watchdog (both go through ``_state_lock``)."""
+        fresh = self._read_folder_tree()
+        with self._state_lock:
+            changed: List[Tuple[str, TNodeValue]] = []
+            diff_trees(self._mirror, fresh, "",
+                       lambda path, value: changed.append((path, value)), DELETED)
+            if not changed:
+                return
+            self._mirror = fresh
+            for changed_path, changed_value in changed:
+                self._publish(changed_path, changed_value)
+        self._drain_pending_updates()
+
+    def _read_folder_tree(self) -> Dict[str, TNodeValue]:
+        """Build a fresh nested mirror straight from disk (dirs -> {}, .json files -> parsed). A file
+        that reads as torn/malformed keeps its CURRENT mirror value rather than vanishing (so a resync
+        that races a mid-write never publishes a spurious delete)."""
+        fresh: Dict[str, TNodeValue] = {}
+        for current_dir, _child_dirs, child_file_names in os.walk(self._root_folder):
+            rel_dir = self._relative_posix(current_dir)
+            if rel_dir is None:
+                continue
+            if rel_dir != "":
+                set_at_path(fresh, split_key_path(rel_dir), {})
+            for file_name in sorted(child_file_names):
+                if not file_name.endswith(FILE_EXTENSION):
+                    continue
+                rel_file = f"{rel_dir}/{file_name}" if rel_dir else file_name
+                steps = split_key_path(rel_file)
+                try:
+                    parsed = self._parse_file(
+                        (self._root_folder / rel_file).read_text(encoding="utf-8"), rel_file)
+                except OSError:
+                    parsed = None
+                if parsed is None:                          # torn read -> keep the current value
+                    found, old_value = get_at_path(self._mirror, steps)
+                    if found:
+                        set_at_path(fresh, steps, old_value)
+                else:
+                    set_at_path(fresh, steps, parsed)
+        return fresh
 
     # ------------------------------------------------------------------ watchdog entry
     def _on_filesystem_event(self, event: FileSystemEvent) -> None:

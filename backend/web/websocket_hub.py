@@ -49,6 +49,7 @@ class WebsocketHub:
 
         board_dict = JsonFolderDerivedDict(paths.board_dir(self._services.root, board["id"]))
         board_dict.start_watching()
+        self._services.register_board_watcher(board["id"], board_dict)   # for in-process write pokes
 
         event_loop = asyncio.get_running_loop()
         outbound_frames: asyncio.Queue = asyncio.Queue()
@@ -79,6 +80,7 @@ class WebsocketHub:
             warn(f"Websocket connection failed: {error!r}")
         finally:
             sender_task.cancel()
+            self._services.unregister_board_watcher(board["id"], board_dict)
             for handle in live_subscriptions.values():
                 board_dict.unsubscribe(handle)
             board_dict.stop_watching()                      # free the per-connection watcher

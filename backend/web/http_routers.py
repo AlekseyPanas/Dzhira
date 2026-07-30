@@ -181,6 +181,14 @@ def build_api_router(services: AppServices) -> APIRouter:
             warn(f"Write op failed unexpectedly: {error!r}")
             raise HTTPException(status_code=400, detail=str(error))
 
+    def acked_board(board: dict, operation) -> dict:
+        """A board-content write: run it, then IMMEDIATELY push the change to that board's live
+        websockets in-process (so updates don't wait on / trust the filesystem watcher). ``acked``
+        raises on failure, so the poke only runs on success."""
+        result = acked(operation)
+        services.notify_board_changed(board["id"])
+        return result
+
     # ================================================================ auth
     @router.post("/auth/register")
     def register(body: AuthBody, response: Response):
@@ -289,86 +297,88 @@ def build_api_router(services: AppServices) -> APIRouter:
         return acked(lambda: services.withdraw_invite(user, body.invite_id))
 
     # ================================================================ board content (scoped writes)
+    # Every one uses acked_board(board, ...) so the change is pushed to the board's websockets in the
+    # same request (independent of the filesystem watcher).
     @router.post("/task/create")
     def task_create(body: CreateTaskBody, user: dict = Depends(require_login)):
         board = require_board(user, body.board_id)
         api = services.board_api(board["id"])
         assignees = services.valid_assignees(board, body.assignees)
-        return acked(lambda: api.create_task(body.project_code, body.title, body.description,
-                                             body.tags, assignees))
+        return acked_board(board, lambda: api.create_task(body.project_code, body.title,
+                                                          body.description, body.tags, assignees))
 
     @router.post("/task/update")
     def task_update(body: UpdateTaskBody, user: dict = Depends(require_login)):
         board = require_board(user, body.board_id)
         api = services.board_api(board["id"])
         assignees = services.valid_assignees(board, body.assignees)
-        return acked(lambda: api.update_task(body.task_id, body.title, body.description,
-                                             body.tags, assignees))
+        return acked_board(board, lambda: api.update_task(body.task_id, body.title,
+                                                          body.description, body.tags, assignees))
 
     @router.post("/task/delete")
     def task_delete(body: TaskIdBody, user: dict = Depends(require_login)):
         board = require_board(user, body.board_id)
-        return acked(lambda: services.board_api(board["id"]).delete_task(body.task_id))
+        return acked_board(board, lambda: services.board_api(board["id"]).delete_task(body.task_id))
 
     @router.post("/task/move")
     def task_move(body: MoveTaskBody, user: dict = Depends(require_login)):
         board = require_board(user, body.board_id)
-        return acked(lambda: services.board_api(board["id"]).move_task(
+        return acked_board(board, lambda: services.board_api(board["id"]).move_task(
             body.task_id, body.status_id, body.index))
 
     @router.post("/column/create")
     def column_create(body: ColumnCreateBody, user: dict = Depends(require_login)):
         board = require_board(user, body.board_id)
-        return acked(lambda: services.board_api(board["id"]).create_column(body.name))
+        return acked_board(board, lambda: services.board_api(board["id"]).create_column(body.name))
 
     @router.post("/column/rename")
     def column_rename(body: ColumnRenameBody, user: dict = Depends(require_login)):
         board = require_board(user, body.board_id)
-        return acked(lambda: services.board_api(board["id"]).rename_column(body.column_id, body.name))
+        return acked_board(board, lambda: services.board_api(board["id"]).rename_column(body.column_id, body.name))
 
     @router.post("/column/move")
     def column_move(body: ColumnMoveBody, user: dict = Depends(require_login)):
         board = require_board(user, body.board_id)
-        return acked(lambda: services.board_api(board["id"]).move_column(body.column_id, body.direction))
+        return acked_board(board, lambda: services.board_api(board["id"]).move_column(body.column_id, body.direction))
 
     @router.post("/column/delete")
     def column_delete(body: ColumnIdBody, user: dict = Depends(require_login)):
         board = require_board(user, body.board_id)
-        return acked(lambda: services.board_api(board["id"]).delete_column(body.column_id))
+        return acked_board(board, lambda: services.board_api(board["id"]).delete_column(body.column_id))
 
     @router.post("/tag/create")
     def tag_create(body: TagCreateBody, user: dict = Depends(require_login)):
         board = require_board(user, body.board_id)
-        return acked(lambda: services.board_api(board["id"]).create_tag(body.name, body.color))
+        return acked_board(board, lambda: services.board_api(board["id"]).create_tag(body.name, body.color))
 
     @router.post("/tag/update")
     def tag_update(body: TagUpdateBody, user: dict = Depends(require_login)):
         board = require_board(user, body.board_id)
-        return acked(lambda: services.board_api(board["id"]).update_tag(body.tag_id, body.name, body.color))
+        return acked_board(board, lambda: services.board_api(board["id"]).update_tag(body.tag_id, body.name, body.color))
 
     @router.post("/tag/delete")
     def tag_delete(body: TagIdBody, user: dict = Depends(require_login)):
         board = require_board(user, body.board_id)
-        return acked(lambda: services.board_api(board["id"]).delete_tag(body.tag_id))
+        return acked_board(board, lambda: services.board_api(board["id"]).delete_tag(body.tag_id))
 
     @router.post("/project/create")
     def project_create(body: ProjectCreateBody, user: dict = Depends(require_login)):
         board = require_board(user, body.board_id)
-        return acked(lambda: services.board_api(board["id"]).create_project(body.code, body.color))
+        return acked_board(board, lambda: services.board_api(board["id"]).create_project(body.code, body.color))
 
     @router.post("/project/rename")
     def project_rename(body: ProjectRenameBody, user: dict = Depends(require_login)):
         board = require_board(user, body.board_id)
-        return acked(lambda: services.board_api(board["id"]).rename_project(body.code, body.new_code))
+        return acked_board(board, lambda: services.board_api(board["id"]).rename_project(body.code, body.new_code))
 
     @router.post("/project/set_color")
     def project_set_color(body: ProjectColorBody, user: dict = Depends(require_login)):
         board = require_board(user, body.board_id)
-        return acked(lambda: services.board_api(board["id"]).set_project_color(body.code, body.color))
+        return acked_board(board, lambda: services.board_api(board["id"]).set_project_color(body.code, body.color))
 
     @router.post("/project/delete")
     def project_delete(body: ProjectCodeBody, user: dict = Depends(require_login)):
         board = require_board(user, body.board_id)
-        return acked(lambda: services.board_api(board["id"]).delete_project(body.code))
+        return acked_board(board, lambda: services.board_api(board["id"]).delete_project(body.code))
 
     return router

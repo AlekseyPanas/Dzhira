@@ -39,6 +39,22 @@ def test_create_board_and_stream_it_over_ws(tmp_path):
             assert frame["value"]["board.json"]["name"] == "MyBoard"
 
 
+def test_http_write_pushes_update_over_ws(tmp_path):
+    # The crux of the production fix: an HTTP write must push over the websocket in-process, without
+    # depending on the filesystem watcher firing.
+    with _client(tmp_path) as client:
+        client.post("/api/auth/register", json={"username": "Bob", "password": "pw"})
+        client.post("/api/boards/create", json={"name": "MyBoard"})
+        board_id = client.get("/api/boards").json()["boards"][0]["id"]
+        with client.websocket_connect("/ws?board=MyBoard", headers=_cookie_header(client)) as ws:
+            ws.send_json({"op": "subscribe", "sub_id": "s1", "key_path": "columns"})
+            assert ws.receive_json()["op"] == "subscribed"
+            assert client.post("/api/column/create",
+                               json={"board_id": board_id, "name": "Later"}).json() == {"ok": True}
+            frame = ws.receive_json()                        # arrives via the write-time poke
+            assert frame["op"] == "update" and frame["key_path"].startswith("columns/")
+
+
 def test_ws_requires_auth_and_access(tmp_path):
     with _client(tmp_path) as client:
         # no cookie at all -> unauthorized

@@ -6,8 +6,9 @@ list by resolving ids to usernames; the max-2-owned and owner-only permission ch
 one place. Every method that mutates on a user's behalf takes the acting ``user`` and enforces access.
 """
 
+import threading
 from pathlib import Path
-from typing import List, Optional, Union
+from typing import Dict, List, Optional, Union
 
 from backend.db import ids, paths
 from backend.db.accounts import AccountsStore
@@ -15,6 +16,8 @@ from backend.db.board_api import BoardAPI
 from backend.db.boards import BoardsStore
 from backend.db.invites import InvitesStore
 from backend.db.sessions import SessionStore
+from backend.derived.json_folder_derived_dict import JsonFolderDerivedDict
+from backend.util.logs import warn
 
 
 class AppServices:
@@ -25,6 +28,36 @@ class AppServices:
         self.sessions = SessionStore(self.root)
         self.boards = BoardsStore(self.root)
         self.invites = InvitesStore(self.root)
+        # Live board mirrors, by board id — one per active websocket connection. Writes poke these
+        # in-process so live updates don't depend on watchdog/inotify actually firing (see
+        # notify_board_changed). Guarded because ws connections register/unregister on their own
+        # threads while HTTP writes poke from the request threadpool.
+        self._board_watchers: Dict[str, List[JsonFolderDerivedDict]] = {}
+        self._watchers_lock = threading.Lock()
+
+    # ------------------------------------------------------------------ live board mirrors
+    def register_board_watcher(self, board_id: str, mirror: JsonFolderDerivedDict) -> None:
+        with self._watchers_lock:
+            self._board_watchers.setdefault(board_id, []).append(mirror)
+
+    def unregister_board_watcher(self, board_id: str, mirror: JsonFolderDerivedDict) -> None:
+        with self._watchers_lock:
+            watchers = self._board_watchers.get(board_id)
+            if watchers and mirror in watchers:
+                watchers.remove(mirror)
+            if watchers is not None and not watchers:
+                self._board_watchers.pop(board_id, None)
+
+    def notify_board_changed(self, board_id: str) -> None:
+        """Called right after any write to a board: re-scan its live mirrors and push the diffs to
+        their websockets NOW, without waiting on (or trusting) the filesystem watcher."""
+        with self._watchers_lock:
+            watchers = list(self._board_watchers.get(board_id, []))
+        for mirror in watchers:
+            try:
+                mirror.resync()
+            except Exception as error:                       # a bad mirror must not fail the write
+                warn(f"Board resync failed for '{board_id}': {error!r}")
 
     # ------------------------------------------------------------------ auth
     def user_for_session(self, session_id: Optional[str]) -> Optional[dict]:
@@ -60,16 +93,19 @@ class AppServices:
         board = self._require_owner(user, board_id)
         self.invites.delete_for_board(board["id"])
         self.boards.delete_board(board_id)
+        self.notify_board_changed(board_id)                  # connected clients see it vanish -> redirect
 
     def kick(self, user: dict, board_id: str, target_id: str) -> None:
         board = self._require_owner(user, board_id)
         if target_id == board["owner_id"]:
             raise ValueError("The owner can't be kicked.")
         self.boards.kick_member(board_id, target_id)
+        self.notify_board_changed(board_id)                  # membership + task assignees changed
 
     def transfer(self, user: dict, board_id: str, new_owner_id: str) -> None:
         self._require_owner(user, board_id)
         self.boards.transfer_ownership(board_id, new_owner_id)
+        self.notify_board_changed(board_id)
 
     # ------------------------------------------------------------------ invites
     def create_invite(self, user: dict, board_id: str, invitee_username: str) -> dict:
@@ -105,6 +141,7 @@ class AppServices:
         invite = self._require_own_invite(user, invite_id)
         self.boards.add_member(invite["board_id"], user["id"])
         self.invites.delete(invite_id)
+        self.notify_board_changed(invite["board_id"])        # existing members see the newcomer live
 
     def reject_invite(self, user: dict, invite_id: str) -> None:
         self._require_own_invite(user, invite_id)
