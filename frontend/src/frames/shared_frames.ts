@@ -1,22 +1,19 @@
-// The shared frame singletons — the cross-component reference surface.
-//   - dbFrame:  a SyncedClientFrame mirroring the whole backend DB derived dict (the read side).
-//   - uiFrame:  frontend-only UI state — which popout is open (and its params). One writer at a
-//               time by convention (the button that opened it / the popout itself).
-// (Drag state is NOT a frame — the drag controller manipulates the DOM directly and commits once on
-// drop, so it stays out of the Nano render cycle. See frontend/src/drag_controller.ts.)
+// The shared frame singletons.
+//   - authFrame:      the logged-in user ({id,username,color}) or null — from /api/auth/me.
+//   - routeFrame:     the current client-side path (see router.ts).
+//   - boardFrame:     a SyncedClientFrame mirroring the CURRENT board's content over the websocket.
+//   - boardMetaFrame: the current board's id/name + members (id→username/color/role) + my role —
+//                     fetched via API (not the socket), refreshed on board load + membership change.
+//   - uiFrame:        which popout / confirm is open.
 
-import { DerivedDicts } from "../derived_dicts";
 import { LocalClientFrame } from "./local_client_frame";
 import { SyncedClientFrame } from "./synced_client_frame";
 
-export const dbFrame = new SyncedClientFrame();     // <- DB (meta/projects/tags/columns/tasks)
+export const authFrame = new LocalClientFrame({ user: null });
+export const routeFrame = new LocalClientFrame({ path: location.pathname });
+export const boardFrame = new SyncedClientFrame();   // <- board.json + columns/tags/projects/tasks
+export const boardMetaFrame = new LocalClientFrame({ name: "", id: "", members: [], myRole: null });
 
-// popup:   null | { kind: "task", taskId?: string } | { kind: "tags" } | { kind: "projects" }
-//                | { kind: "assignee" }
-// confirm: null | { message, confirmLabel?, action: () => void }   (action is a live closure)
+// popup:   null | { kind: "task", taskId? } | "tags" | "projects" | "profile" | "invite" | "boards"
+// confirm: null | { message, confirmLabel?, action }
 export const uiFrame = new LocalClientFrame({ popup: null, confirm: null });
-
-/** Wire the synced frame to its dict. Called once from the entrypoint (subscriptions flow on open). */
-export function subscribeSharedFrames(): void {
-    dbFrame.sub(DerivedDicts.DB);
-}

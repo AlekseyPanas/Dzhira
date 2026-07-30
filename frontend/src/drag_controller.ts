@@ -9,8 +9,13 @@
 // exactly where the card lands — reordering within a column or moving between columns. Release to drop.
 
 import { taskApi } from "./api";
+import { boardFrame } from "./frames/shared_frames";
 
 const DRAG_THRESHOLD_PX = 5;
+// After release we hold the floating card until the backend's change streams back and re-renders the
+// real card in place. This is the safety net if that signal never arrives (e.g. a drop that resolves
+// to the exact same order, which publishes nothing): drop the floating card anyway.
+const COMMIT_TIMEOUT_MS = 2000;
 
 interface Pending { taskId: string; startX: number; startY: number; card: HTMLElement; }
 interface Dragging {
@@ -25,6 +30,7 @@ interface Dragging {
 
 let pending: Pending | null = null;
 let dragging: Dragging | null = null;
+let committing = false;         // true between release and the backend reply — blocks a second drag
 let justDragged = false;        // set on drop so the card's click handler skips opening the editor
 
 /** True (once) if a drag just ended — the card onClick checks this to avoid opening the editor. */
@@ -40,7 +46,7 @@ export function installDragController(): void {
 }
 
 function onPointerDown(event: PointerEvent): void {
-    if (event.button !== 0) return;
+    if (event.button !== 0 || committing) return;           // ignore new drags while a drop commits
     const target = event.target as HTMLElement;
     if (target.closest(".card-trash")) return;              // the trash button owns its own clicks
     const card = target.closest<HTMLElement>(".task-card");
@@ -116,19 +122,48 @@ function onPointerUp(_event: PointerEvent): void {
     const statusId = container?.dataset.columnId;
     const index = container ? indexOfGhost(container, drag.ghost, drag.taskId) : 0;
 
+    if (!statusId) { finishDrag(drag); return; }            // dropped nowhere — settle back in place
+
+    // Enter the COMMIT phase (the anti-flicker): snap the floating card onto the ghost slot and keep
+    // it there, blocking any new drag, until the backend's change streams back over the websocket and
+    // re-renders the real card underneath. Only THEN do we drop the floating copy — so the card is
+    // never absent for a frame. Reads as a touch of lag on release, never a flicker.
+    committing = true;
+    const slot = drag.ghost.getBoundingClientRect();
+    drag.floating.style.left = `${slot.left}px`;
+    drag.floating.style.top = `${slot.top}px`;
+    drag.floating.classList.add("committing");
+
+    let done = false;
+    let unsubscribe: (() => void) | null = null;
+    let timer: ReturnType<typeof setTimeout>;
+    const finishOnce = () => {
+        if (done) return;
+        done = true;
+        unsubscribe?.();
+        clearTimeout(timer);
+        // When this fires from the boardFrame change, the Board re-rendered FIRST (it subscribed earlier,
+        // so it runs earlier in the same notification) — the real card is already in place, so
+        // removing the floating copy now is seamless. (No rAF: it doesn't fire in a background tab.)
+        finishDrag(drag);
+    };
+
+    unsubscribe = boardFrame.subscribe(`tasks/${drag.taskId}.json`, finishOnce);   // the reply signal
+    timer = setTimeout(finishOnce, COMMIT_TIMEOUT_MS);                          // no-op-move fallback
+    void taskApi.move(drag.taskId, statusId, index).then((error) => {
+        if (error) { console.error("[drag] move failed:", error); finishOnce(); }
+    });
+}
+
+/** Tear down the drag visuals and un-hide the source card. Un-hiding is a no-op when the re-render
+ *  already replaced it (the common success case), and the correct restore when it did not (a rejected
+ *  move, a no-op move, or a drop nowhere). Clears the commit lock. */
+function finishDrag(drag: Dragging): void {
     drag.floating.remove();
     drag.ghost.remove();
+    drag.original.classList.remove("drag-hidden");
     document.body.classList.remove("is-dragging");
-
-    if (!statusId) { drag.original.classList.remove("drag-hidden"); return; }   // dropped nowhere
-    // Commit. On success the websocket update re-renders the whole board (dropping our hidden
-    // original + ghost with it); only restore the original if the write is rejected.
-    void taskApi.move(drag.taskId, statusId, index).then((error) => {
-        if (error) {
-            console.error("[drag] move failed:", error);
-            drag.original.classList.remove("drag-hidden");
-        }
-    });
+    committing = false;
 }
 
 // ------------------------------------------------------------------ DOM helpers

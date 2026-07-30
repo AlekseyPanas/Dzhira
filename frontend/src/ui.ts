@@ -8,7 +8,9 @@ export type PopupState =
     | { kind: "task"; taskId?: string }
     | { kind: "tags" }
     | { kind: "projects" }
-    | { kind: "assignee" };
+    | { kind: "invite" }
+    | { kind: "profile" }
+    | { kind: "newboard" };
 
 export function openPopup(popup: Exclude<PopupState, null>): void {
     uiFrame.write("popup", popup);

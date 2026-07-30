@@ -1,5 +1,5 @@
-"""End-to-end boot: the app builds, seeds a starter board, streams it over the websocket, and writes
-land through the HTTP router. Uses the in-process FastAPI TestClient (lifespan runs the watchdog)."""
+"""End-to-end boot over HTTP + websocket: register → create board → list → stream the board; auth is
+enforced on the socket. Uses the in-process FastAPI TestClient."""
 
 from fastapi.testclient import TestClient
 
@@ -7,33 +7,56 @@ from backend.app import create_app
 
 
 def _client(tmp_path):
-    app = create_app(db_folder=tmp_path / "db", serve_frontend_dist=False)
-    return TestClient(app)
+    return TestClient(create_app(db_folder=tmp_path / "db", serve_frontend_dist=False))
 
 
-def test_websocket_snapshot_has_seeded_board(tmp_path):
+def _cookie_header(client):
+    return {"cookie": f"dzhira_session={client.cookies.get('dzhira_session')}"}
+
+
+def test_register_login_and_me(tmp_path):
     with _client(tmp_path) as client:
-        with client.websocket_connect("/ws") as ws:
-            ws.send_json({"op": "subscribe", "sub_id": "s1", "derived_dict": "DB", "key_path": ""})
+        assert client.get("/api/auth/me").json() == {"user": None}
+        registered = client.post("/api/auth/register", json={"username": "Bob", "password": "pw"})
+        assert registered.status_code == 200
+        assert registered.json()["user"]["username"] == "Bob"
+        assert client.get("/api/auth/me").json()["user"]["username"] == "Bob"   # cookie persists
+        assert client.post("/api/auth/register", json={"username": "bob", "password": "x"}).status_code == 400
+
+
+def test_create_board_and_stream_it_over_ws(tmp_path):
+    with _client(tmp_path) as client:
+        client.post("/api/auth/register", json={"username": "Bob", "password": "pw"})
+        assert client.post("/api/boards/create", json={"name": "MyBoard"}).json() == {"name": "MyBoard"}
+        boards = client.get("/api/boards").json()["boards"]
+        assert boards[0]["name"] == "MyBoard" and boards[0]["role"] == "owner"
+
+        with client.websocket_connect("/ws?board=MyBoard", headers=_cookie_header(client)) as ws:
+            ws.send_json({"op": "subscribe", "sub_id": "s1", "key_path": ""})
             frame = ws.receive_json()
             assert frame["op"] == "subscribed"
-            board = frame["value"]
-            assert set(board) >= {"meta", "projects", "tags", "columns", "tasks"}
-            assert len(board["columns"]) >= 1                # the app mandates >= 1 column
-            assert board["meta"]["assignee.json"]["name"]   # the single user is seeded
+            assert "columns" in frame["value"] and len(frame["value"]["columns"]) >= 1
+            assert frame["value"]["board.json"]["name"] == "MyBoard"
 
 
-def test_http_write_acks_and_rejects(tmp_path):
+def test_ws_requires_auth_and_access(tmp_path):
     with _client(tmp_path) as client:
-        assert client.post("/api/project/create", json={"code": "ENG"}).json() == {"ok": True}
-        bad = client.post("/api/project/create", json={"code": "toolong"})
-        assert bad.status_code == 400
-        assert "valid project code" in bad.json()["detail"]
+        # no cookie at all -> unauthorized
+        with client.websocket_connect("/ws?board=Nope") as ws:
+            assert ws.receive_json() == {"op": "error", "message": "unauthorized"}
+        # logged in but board doesn't exist / no access -> no-access
+        client.post("/api/auth/register", json={"username": "Bob", "password": "pw"})
+        with client.websocket_connect("/ws?board=Ghost", headers=_cookie_header(client)) as ws:
+            assert ws.receive_json() == {"op": "error", "message": "no-access"}
 
 
-def test_unknown_derived_dict_errors_on_socket(tmp_path):
+def test_board_content_write_requires_login_and_access(tmp_path):
     with _client(tmp_path) as client:
-        with client.websocket_connect("/ws") as ws:
-            ws.send_json({"op": "subscribe", "sub_id": "s1", "derived_dict": "NOPE", "key_path": ""})
-            frame = ws.receive_json()
-            assert frame["op"] == "error"
+        # not logged in
+        assert client.post("/api/column/create", json={"board_id": "brd_00000000", "name": "X"}).status_code == 401
+        client.post("/api/auth/register", json={"username": "Bob", "password": "pw"})
+        client.post("/api/boards/create", json={"name": "MyBoard"})
+        board_id = client.get("/api/boards").json()["boards"][0]["id"]
+        assert client.post("/api/column/create", json={"board_id": board_id, "name": "Later"}).json() == {"ok": True}
+        # a board id we don't have access to -> 404 (no such board) / 403
+        assert client.post("/api/column/create", json={"board_id": "brd_deadbeef", "name": "X"}).status_code == 404

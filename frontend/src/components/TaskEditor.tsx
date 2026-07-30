@@ -8,16 +8,16 @@
 
 import Nano, { Component, h } from "nano-jsx";
 import { taskApi } from "../api";
-import { contrastInk, projectCodes, tagsList, taskById, projectOf, type Task } from "../model";
+import { contrastInk, firstInitial, members, projectCodes, tagsList, taskById, projectOf, type Task } from "../model";
 import { askConfirm, closePopup, openPopup } from "../ui";
 import { Modal, presentIf } from "./shared_widgets";
-import { dbFrame } from "../frames/shared_frames";
+import { boardFrame, boardMetaFrame } from "../frames/shared_frames";
 import { bindFrames } from "../frames/bind_frames";
 
 interface TaskEditorProps { taskId?: string; }
 
 export class TaskEditor extends Component<TaskEditorProps> {
-    private draft: { title: string; description: string; tags: string[]; projectCode: string };
+    private draft: { title: string; description: string; tags: string[]; projectCode: string; assignees: string[] };
     private error: string | null = null;
 
     constructor(props: TaskEditorProps) {
@@ -28,8 +28,16 @@ export class TaskEditor extends Component<TaskEditorProps> {
             description: existing?.description ?? "",
             tags: [...(existing?.tags ?? [])],
             projectCode: projectCodes()[0] ?? "",
+            assignees: [...(existing?.assignees ?? [])],
         };
-        bindFrames(this, [dbFrame]);
+        bindFrames(this, [boardFrame, boardMetaFrame]);
+    }
+
+    private toggleAssignee(userId: string): void {
+        this.draft.assignees = this.draft.assignees.includes(userId)
+            ? this.draft.assignees.filter((id) => id !== userId)
+            : [...this.draft.assignees, userId];
+        this.update();
     }
 
     private isEdit(): boolean {
@@ -44,10 +52,10 @@ export class TaskEditor extends Component<TaskEditorProps> {
     }
 
     private async save(): Promise<void> {
-        const { title, description, tags, projectCode } = this.draft;
+        const { title, description, tags, projectCode, assignees } = this.draft;
         const error = this.isEdit()
-            ? await taskApi.update(this.props.taskId!, title, description, tags)
-            : await taskApi.create(projectCode, title, description, tags);
+            ? await taskApi.update(this.props.taskId!, title, description, tags, assignees)
+            : await taskApi.create(projectCode, title, description, tags, assignees);
         if (error) { this.error = error; this.update(); return; }
         closePopup();
     }
@@ -114,6 +122,23 @@ export class TaskEditor extends Component<TaskEditorProps> {
                                              style={on ? `background:${tag.color}; color:${contrastInk(tag.color)}` : ""}
                                              onClick={() => this.toggleTag(tag.id)}>
                                   {on ? "✓ " : ""}{tag.name}
+                              </button>;
+                          })}
+                </div>
+
+                <label class="field-label">Assignees</label>
+                <div class="tag-picker">
+                    {members().length === 0
+                        ? <span class="muted">no members</span>
+                        : members().map((member) => {
+                              const on = this.draft.assignees.includes(member.id);
+                              return <button class={on ? "assignee-pick on" : "assignee-pick off"}
+                                             onClick={() => this.toggleAssignee(member.id)}>
+                                  <span class="assignee-circle small"
+                                        style={`background-color:${member.color}; color:${contrastInk(member.color)}`}>
+                                      {firstInitial(member.username)}
+                                  </span>
+                                  {member.username}
                               </button>;
                           })}
                 </div>

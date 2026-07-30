@@ -3,11 +3,11 @@
 // draft discipline as the task editor: text inputs mutate the draft without calling update().
 
 import Nano, { Component, h } from "nano-jsx";
-import { assigneeApi, projectApi, tagApi } from "../api";
-import { assignee, allTasks, contrastInk, firstInitial, projectCodes, tagsList, type Tag } from "../model";
+import { projectApi, tagApi } from "../api";
+import { allTasks, defaultProjectColor, projectColor, projects, tagsList, type Tag } from "../model";
 import { askConfirm, closePopup } from "../ui";
-import { Modal, presentIf } from "./shared_widgets";
-import { dbFrame } from "../frames/shared_frames";
+import { Modal } from "./shared_widgets";
+import { boardFrame } from "../frames/shared_frames";
 import { bindFrames } from "../frames/bind_frames";
 
 // ================================================================== Tags
@@ -69,7 +69,7 @@ class NewTagForm extends Component {
 }
 
 export class TagsManager extends Component {
-    constructor(props: any) { super(props); bindFrames(this, [dbFrame]); }
+    constructor(props: any) { super(props); bindFrames(this, [boardFrame]); }
     override render() {
         const tags = tagsList();
         return (
@@ -85,11 +85,15 @@ export class TagsManager extends Component {
 
 // ================================================================== Projects
 class ProjectRow extends Component<{ code: string }> {
-    private draft: { newCode: string };
+    private draft: { newCode: string; color: string };
     private error: string | null = null;
     constructor(props: { code: string }) {
         super(props);
-        this.draft = { newCode: props.code };
+        this.draft = { newCode: props.code, color: projectColor(props.code) };
+    }
+    private async saveColor() {
+        this.error = await projectApi.setColor(this.props.code, this.draft.color);
+        this.update();
     }
     private async rename() {
         if (this.draft.newCode.toUpperCase() === this.props.code) return;
@@ -108,6 +112,9 @@ class ProjectRow extends Component<{ code: string }> {
         const count = allTasks().filter((t) => t.id.startsWith(`${this.props.code}-`)).length;
         return (
             <div class="list-row">
+                <input type="color" class="swatch" value={this.draft.color} title="project color"
+                       onInput={(e: any) => { this.draft.color = e.target.value; }}
+                       onChange={() => void this.saveColor()} />
                 <input type="text" class="text-input code-input" maxLength={3} value={this.draft.newCode}
                        onInput={(e: any) => { this.draft.newCode = e.target.value; }} />
                 <span class="grow muted">{count} task(s)</span>
@@ -121,19 +128,26 @@ class ProjectRow extends Component<{ code: string }> {
 }
 
 class NewProjectForm extends Component {
-    private draft = { code: "" };
+    private draft = { code: "", color: "#5b9bff" };
     private error: string | null = null;
     private async add() {
-        this.error = await projectApi.create(this.draft.code);
-        if (!this.error) this.draft = { code: "" };
+        // If the code is a valid 3 letters, default the color to that code's stable palette color
+        // unless the user picked one — but respect whatever swatch value is showing.
+        this.error = await projectApi.create(this.draft.code, this.draft.color);
+        if (!this.error) this.draft = { code: "", color: "#5b9bff" };
         this.update();
     }
     override render() {
         return (
             <div class="list-row new">
+                <input type="color" class="swatch" value={this.draft.color} title="project color"
+                       onInput={(e: any) => { this.draft.color = e.target.value; }} />
                 <input type="text" class="text-input code-input" maxLength={3} placeholder="ABC"
                        value={this.draft.code}
-                       onInput={(e: any) => { this.draft.code = e.target.value; }} />
+                       onInput={(e: any) => {
+                           this.draft.code = e.target.value;
+                           if (e.target.value.length === 3) { this.draft.color = defaultProjectColor(e.target.value.toUpperCase()); this.update(); }
+                       }} />
                 <span class="grow muted">3 letters</span>
                 <button class="crayon-btn save" onClick={() => void this.add()}>＋ Add</button>
                 {this.error ? <div class="form-error">{this.error}</div> : null}
@@ -143,57 +157,15 @@ class NewProjectForm extends Component {
 }
 
 export class ProjectsManager extends Component {
-    constructor(props: any) { super(props); bindFrames(this, [dbFrame]); }
+    constructor(props: any) { super(props); bindFrames(this, [boardFrame]); }
     override render() {
-        const codes = projectCodes();
+        const list = projects();
         return (
             <Modal title="📁 Projects" onClose={closePopup}>
-                {codes.length === 0 ? <div class="muted">No projects yet — add one below.</div> : null}
-                {codes.map((code) => <ProjectRow code={code} />)}
+                {list.length === 0 ? <div class="muted">No projects yet — add one below.</div> : null}
+                {list.map((project) => <ProjectRow code={project.code} />)}
                 <div class="list-divider">new project</div>
                 <NewProjectForm />
-            </Modal>
-        );
-    }
-}
-
-// ================================================================== Assignee (single user)
-export class AssigneeEditor extends Component {
-    private draft: { name: string; color: string };
-    private error: string | null = null;
-    constructor(props: any) {
-        super(props);
-        const current = assignee();
-        this.draft = { name: current.name, color: current.color };
-        bindFrames(this, [dbFrame]);
-    }
-    private async save() {
-        this.error = await assigneeApi.set(this.draft.name, this.draft.color);
-        if (!this.error) closePopup();
-        else this.update();
-    }
-    override render() {
-        return (
-            <Modal title="🙂 Assignee" onClose={closePopup}>
-                <div class="muted">Dzhira is single-user — this one person is on every task.</div>
-                <div class="assignee-editor-row">
-                    <span class="assignee-circle huge"
-                          style={`background:${this.draft.color}; color:${contrastInk(this.draft.color)}`}>
-                        {firstInitial(this.draft.name)}
-                    </span>
-                    <div class="grow">
-                        <label class="field-label">Name</label>
-                        <input type="text" class="text-input" value={this.draft.name}
-                               onInput={(e: any) => { this.draft.name = e.target.value; this.update(); }} />
-                        <label class="field-label">Circle color</label>
-                        <input type="color" class="swatch big" value={this.draft.color}
-                               onInput={(e: any) => { this.draft.color = e.target.value; this.update(); }} />
-                    </div>
-                </div>
-                {this.error ? <div class="form-error">{this.error}</div> : null}
-                <div class="modal-buttons editor-buttons">
-                    <button class="crayon-btn save" onClick={() => void this.save()}>Save</button>
-                </div>
             </Modal>
         );
     }

@@ -8,7 +8,6 @@
 // baseline, so replays and server restarts are both safe).
 
 import { AClientFrame } from "./a_client_frame";
-import type { TDerivedDictName } from "../derived_dicts";
 import {
     DELETED,
     deleteAtPath,
@@ -29,11 +28,11 @@ export class SyncedClientFrame extends AClientFrame {
         super({});
     }
 
-    /** Mirror `derivedDict` at `keyPath`. A second sub() replaces the subscription. */
-    sub(derivedDict: TDerivedDictName, keyPath: string = ""): void {
+    /** Mirror the connection's board dict at `keyPath`. A second sub() replaces the subscription. */
+    sub(keyPath: string = ""): void {
         this.unsub();
         this.subscriptionRootPath = keyPath;
-        this.unsubscribeFromSocket = sharedSocket.subscribe(derivedDict, keyPath, {
+        this.unsubscribeFromSocket = sharedSocket.subscribe(keyPath, {
             onSnapshot: (value, seq) => {
                 this.lastSeq = seq;                         // fresh baseline (reconnect-safe)
                 this.swapState(value === DELETED ? {} : value);

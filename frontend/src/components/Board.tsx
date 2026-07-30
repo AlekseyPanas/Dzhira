@@ -5,7 +5,7 @@
 
 import Nano, { Component, h } from "nano-jsx";
 import { columnApi } from "../api";
-import { dbFrame } from "../frames/shared_frames";
+import { boardFrame, boardMetaFrame } from "../frames/shared_frames";
 import { bindFrames } from "../frames/bind_frames";
 import { columnsSorted, tasksInColumn, type Column } from "../model";
 import { askConfirm } from "../ui";
@@ -79,7 +79,7 @@ class ColumnView extends Component<ColumnProps> {
 export class Board extends Component {
     constructor(props: any) {
         super(props);
-        bindFrames(this, [dbFrame]);
+        bindFrames(this, [boardFrame, boardMetaFrame]);   // re-render on content AND member changes
     }
 
     override render() {

@@ -1,0 +1,144 @@
+// ================================================================================================
+//  The "horrific hand-painted" theme — a SWAPPABLE reskin. The crisp theme (styles.scss) is left
+//  completely untouched; this file only ADDS rules. Everything visual is scoped under
+//  :root[data-theme="paint"], so with any other theme these rules simply don't apply.
+//
+//  The signature move: crisp CSS borders are replaced by an SVG turbulence + displacement filter
+//  (#paintRough, defined in index.html) applied to a ::before pseudo-element. That warps the OUTLINE
+//  into shaky, half-disconnected MS-Paint pencil strokes while the element's text stays crisp and
+//  readable (the filter is on the border pseudo, not the content). Everything is also tilted a bit
+//  more and the backdrop becomes a grubby paint-smudged canvas.
+//
+//  Note: replaced elements (<input>, <textarea>, <select>, <input type=color>) don't render ::before,
+//  so those keep a plain thick border here instead of the rough one.
+// ================================================================================================
+
+$paint-ink: #141414;
+
+// A pale "brushed white" fill: streaky white gaps + strokes over whatever colour is underneath, as
+// if coloured in badly with a big Paint brush. Layered as a background-IMAGE so it sits behind text.
+@mixin bad-paint-fill {
+    background-image:
+        repeating-linear-gradient(34deg,
+            rgba(255, 255, 255, 0) 0 6px,
+            rgba(255, 255, 255, 0.85) 6px 8px,
+            rgba(255, 255, 255, 0) 8px 9px,
+            rgba(255, 255, 255, 0.5) 9px 11px,
+            rgba(255, 255, 255, 0) 11px 19px),
+        repeating-linear-gradient(34deg,
+            rgba(255, 255, 255, 0) 0 14px,
+            rgba(255, 255, 255, 0.55) 14px 17px,
+            rgba(255, 255, 255, 0) 17px 33px);
+}
+
+:root[data-theme="paint"] {
+    font-family: "Comic Sans MS", "Chalkboard SE", "Marker Felt", cursive;
+
+    // (2) No rainbow. Redefine the loud decorative palette to mostly white + a little grey (the black
+    // ink stays). The MEANINGFUL colours — project stripes/badges, tag chips, the assignee circle —
+    // are set inline per element and are deliberately untouched here.
+    --hotpink: #ffffff;     // topbar
+    --sunny:   #ffffff;     // buttons, count badges, mini-buttons
+    --lime:    #ededed;     // add / save buttons
+    --purple:  #e7e4dc;     // column headers
+    --skyblue: #ffffff;     // assignee button
+    --orange:  #e7e4dc;     // modal titlebars
+    --card:    #ffffff;     // task cards
+    --paper:   #ffffff;     // modal bodies
+
+    // ---- the rough-outline set: hide the crisp border/shadow, draw a filtered outline on top -----
+    // (NOT .theme-switcher — it is position:fixed and must stay put; only its buttons get roughened.)
+    .task-card, .board-column, .column-header, .column-count, .crayon-btn, .mini-btn, .add-column,
+    .modal-box, .modal-titlebar, .tag-chip, .assignee-circle, .assignee-button, .card-id,
+    .list-row, .theme-btn, .auth-card, .dropdown, .assignee-pick {
+        border: none !important;
+        box-shadow: none !important;
+        position: relative;
+
+        &::before {
+            content: "";
+            position: absolute;
+            inset: -2px;
+            border: 4px solid $paint-ink;
+            border-radius: inherit;
+            filter: url(#paintRough);
+            pointer-events: none;
+            z-index: 3;
+        }
+    }
+
+    // heavier, uneven tilt so nothing looks machine-placed
+    .task-card { transform: rotate(-1.4deg); }
+    .task-card:nth-child(2n) { transform: rotate(1.6deg); }
+    .task-card:nth-child(3n) { transform: rotate(-0.8deg); }
+    .task-card:hover { transform: translate(-2px, -3px) rotate(0.6deg); box-shadow: none !important; }
+    .board-column:nth-child(3n) { transform: rotate(-1.6deg); }
+    .board-column:nth-child(3n+1) { transform: rotate(1.1deg); }
+    .modal-box { transform: rotate(-1.2deg); }
+
+    // flatten fills + fix the text that used to be white-on-colour (the fills are pale now)
+    .board-column { background: rgba(255, 255, 255, 0.6); }
+    .task-card { background: #ffffff; }
+    .topbar { box-shadow: none; border-bottom: 7px solid $paint-ink; }
+    .brand { color: #1b1b1b; text-shadow: 2px 2px 0 rgba(0, 0, 0, 0.10); }
+    .column-header, .column-name, .assignee-name { color: #262626; text-shadow: none; }
+    // one muted red for the destructive controls (semantic, not "rainbow")
+    .crayon-btn.danger, .mini-btn.danger, .modal-x { background: #df8078 !important; color: #fff; }
+    .theme-btn { background: #ffffff; }
+    .theme-btn.active { background: #d8d8d8; }
+
+    // form controls can't take a ::before, so give them a plain thick scrawl border
+    .text-input, .area-input, .select-input, .column-name-input, .swatch {
+        border: 3.5px solid $paint-ink !important;
+        box-shadow: none !important;
+    }
+
+    // (4) more room in the id chip so the rough border doesn't kiss the text
+    .card-id { padding: 3px 8px; }
+
+    // (3) the "badly coloured in Paint" fill on the colour-bearing bits. These carry an inline
+    // background-COLOR (not the shorthand), so this background-IMAGE layers on top — colour in the
+    // gaps, pale streaks where the brush skipped — and stays behind the text, so labels stay legible.
+    .card-stripe, .card-id, .tag-chip, .assignee-circle { @include bad-paint-fill; }
+}
+
+// the plain off-white canvas with a faint grey brush texture (no rainbow). Set on BODY, since the
+// body's own background otherwise covers the html element.
+:root[data-theme="paint"] body {
+    background-color: #f2f0ea;
+    background-image:
+        repeating-linear-gradient(32deg, rgba(0, 0, 0, 0.03) 0 2px, transparent 2px 24px),
+        repeating-linear-gradient(-57deg, rgba(0, 0, 0, 0.02) 0 2px, transparent 2px 34px);
+}
+
+// ================================================================================================
+//  The theme switcher widget — THEME-NEUTRAL styles (apply in every theme). Kept here so the crisp
+//  stylesheet stays untouched.
+// ================================================================================================
+.theme-switcher {
+    position: fixed;
+    bottom: 14px;
+    right: 14px;
+    z-index: 60;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 9px;
+    background: rgba(255, 255, 255, 0.9);
+    border: 3px solid #111;
+    border-radius: 12px 8px 12px 8px;
+    box-shadow: 3px 3px 0 rgba(0, 0, 0, 0.3);
+    font-family: "Comic Sans MS", "Chalkboard SE", cursive;
+}
+.theme-switcher-label { font-size: 12px; font-weight: 700; color: #444; }
+.theme-btn {
+    background: #ffe14d;
+    border: 2.5px solid #111;
+    border-radius: 8px;
+    padding: 4px 9px;
+    font-size: 13px;
+    font-weight: 800;
+    font-family: inherit;
+    cursor: pointer;
+}
+.theme-btn.active { background: #b6ff3d; box-shadow: inset 2px 2px 0 rgba(0, 0, 0, 0.2); }

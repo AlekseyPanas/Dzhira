@@ -43,4 +43,12 @@ if (!result.success) {
 }
 await buildCombinedCss();
 await fs.copyFile("index.html", path.join("dist", "index.html"));
+
+// Copy static assets (the JIRABAD logo, favicon) to the dist root so the server serves them at "/"
+// (the img src + <link rel=icon> reference them by absolute path).
+const assetsDir = path.join("src", "assets");
+for (const name of await fs.readdir(assetsDir)) {
+    await fs.copyFile(path.join(assetsDir, name), path.join("dist", name));
+}
+
 console.log("frontend built -> dist/");

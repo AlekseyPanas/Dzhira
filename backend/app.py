@@ -1,26 +1,23 @@
-"""The thin composition root — the ONLY place instances are constructed and lifecycles are owned.
+"""The composition root: build the services, wire transport, and serve the SPA.
 
-Build order: scaffold the DB folder → the one folder-backed derived dict (``DB``) → the ``BoardAPI``
-writer → the registry → transport (websocket hub + HTTP router) → static frontend LAST (so ``/ws``
-and ``/api/*`` win the route match). The watchdog observer starts in the FastAPI lifespan and stops
-on shutdown.
+No global watchdog any more — the read side is per-connection (a board dict is created when a client
+opens ``/ws?board=<name>`` and dropped on disconnect; see the websocket hub). The lifespan just prunes
+expired sessions at startup. The frontend is a single-page app, so every non-API/non-asset path serves
+``index.html`` and the client router decides what to show.
 
 ``create_app`` is the injectable factory the tests drive (a tmp ``db_folder``, ``serve_frontend_dist``
-off). ``backend/main.py`` is the launcher that builds the frontend then serves this on uvicorn.
+off). ``backend/main.py`` builds the frontend then serves this on uvicorn.
 """
 
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Union
 
-from fastapi import FastAPI, WebSocket
-from fastapi.staticfiles import StaticFiles
+from fastapi import FastAPI, HTTPException, WebSocket
+from fastapi.responses import FileResponse
 
-from backend.db.board_api import BoardAPI
-from backend.db.layout import ensure_scaffold
-from backend.derived.json_folder_derived_dict import JsonFolderDerivedDict
+from backend.services import AppServices
 from backend.web.http_routers import build_api_router
-from backend.web.registry import DerivedDicts, DerivedDictsRegistry
 from backend.web.websocket_hub import WebsocketHub
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -31,32 +28,40 @@ FRONTEND_DIST_FOLDER = FRONTEND_FOLDER / "dist"
 
 def create_app(db_folder: Union[str, Path] = DEFAULT_DB_FOLDER,
                serve_frontend_dist: bool = True) -> FastAPI:
-    db_folder = Path(db_folder)
-    ensure_scaffold(db_folder)                              # make subfolders + seed a starter board
-
-    db_derived_dict = JsonFolderDerivedDict(db_folder)      # the read side: mirror the DB folder
-    board = BoardAPI(db_folder)                             # the write side: the only writer
-
-    registry = DerivedDictsRegistry()
-    registry.register(DerivedDicts.DB, db_derived_dict)
+    services = AppServices(db_folder)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
-        db_derived_dict.start_watching()                    # observer up, then initial scan
+        services.sessions.cleanup_expired()
         yield
-        db_derived_dict.stop_watching()
 
     app = FastAPI(lifespan=lifespan)
-    websocket_hub = WebsocketHub(registry)
+    app.state.services = services
+    websocket_hub = WebsocketHub(services)
 
     @app.websocket("/ws")
     async def websocket_endpoint(websocket: WebSocket):
         await websocket_hub.handle_connection(websocket)
 
-    app.include_router(build_api_router(board))
+    app.include_router(build_api_router(services))
 
-    # Static frontend LAST so /ws and /api/* match first.
-    if serve_frontend_dist and FRONTEND_DIST_FOLDER.is_dir():
-        app.mount("/", StaticFiles(directory=FRONTEND_DIST_FOLDER, html=True), name="frontend")
-
+    if serve_frontend_dist:
+        _mount_spa(app)
     return app
+
+
+def _mount_spa(app: FastAPI) -> None:
+    """Serve real files from ``frontend/dist`` and fall back to ``index.html`` for every app route
+    (``/login``, ``/create``, ``/new``, ``/board/<name>``) so client-side routing works on hard reload."""
+    index_path = FRONTEND_DIST_FOLDER / "index.html"
+
+    @app.get("/{full_path:path}")
+    def spa(full_path: str):
+        if full_path.startswith("api/") or full_path == "ws":
+            raise HTTPException(status_code=404)
+        candidate = (FRONTEND_DIST_FOLDER / full_path).resolve()
+        if full_path and candidate.is_file() and FRONTEND_DIST_FOLDER.resolve() in candidate.parents:
+            return FileResponse(candidate)                  # a real asset (client.js, styles.css, …)
+        if index_path.is_file():
+            return FileResponse(index_path)                 # SPA fallback
+        raise HTTPException(status_code=404, detail="Frontend not built.")

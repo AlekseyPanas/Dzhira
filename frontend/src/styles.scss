@@ -55,6 +55,9 @@ button { font-family: inherit; cursor: pointer; }
     letter-spacing: 1px;
 }
 .brand-crayon { display: inline-block; transform: rotate(12deg); }
+// The JIRABAD logo that replaced the corner pencil. Sized to the brand text; a slight tilt to fit
+// the goofy hand-drawn vibe. (Its source PNG is large — swap in a resized copy if load time matters.)
+.brand-logo { height: 1.05em; width: auto; vertical-align: -0.16em; transform: rotate(6deg); }
 
 .topbar-buttons { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 
@@ -181,9 +184,21 @@ button { font-family: inherit; cursor: pointer; }
     border: var(--outline);
     border-radius: 12px 14px 10px 16px;
     box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.28);
-    padding: 10px 12px 8px;
+    padding: 10px 12px 8px 20px;            // extra left room for the project stripe
     cursor: pointer;
     transition: transform 0.08s ease, box-shadow 0.08s ease;
+}
+
+// The project-color stripe down the card's left edge (its "sidebar"). Left corners rounded to sit
+// inside the card's rounded corners (no overflow:hidden, so the paint theme's outside border is safe).
+.card-stripe {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 12px;
+    border-right: 3px solid var(--ink);
+    border-radius: 9px 0 0 13px;
 }
 .task-card:nth-child(2n) { transform: rotate(-0.8deg); }
 .task-card:nth-child(3n) { transform: rotate(0.9deg); }
@@ -209,7 +224,8 @@ button { font-family: inherit; cursor: pointer; }
     font-weight: 700; font-size: 11px;
     background: var(--sunny);
     border: 2px solid var(--ink); border-radius: 6px;
-    padding: 0 5px;
+    padding: 2px 6px;
+    line-height: 1.2;
     white-space: nowrap;
 }
 
@@ -344,3 +360,63 @@ button:disabled { opacity: 0.4; cursor: default; }
 .list-row .text-input { width: auto; }
 .list-row .text-input.grow { flex: 1 1 120px; }
 .list-row .code-input { flex: 0 0 auto; }
+
+// ------------------------------------------------------------------ auth pages (/login /create /new)
+.auth-page {
+    min-height: 100vh;
+    display: flex; align-items: center; justify-content: center;
+    padding: 24px;
+}
+.auth-card {
+    background: #fff;
+    border: var(--outline);
+    border-radius: 18px 8px 18px 8px;
+    box-shadow: 9px 9px 0 rgba(0, 0, 0, 0.35);
+    width: 380px; max-width: 100%;
+    padding: 24px;
+    transform: rotate(-0.6deg);
+}
+.auth-card.wide-card { width: 560px; }
+.auth-brand { font-size: 32px; text-align: center; margin-bottom: 6px; }
+.auth-title { font-size: 22px; font-weight: 900; text-align: center; margin-bottom: 16px; }
+.auth-card .text-input { margin-bottom: 10px; }
+.auth-submit { width: 100%; margin-top: 6px; }
+.auth-switch { margin-top: 14px; text-align: center; font-size: 14px; }
+.new-section-label {
+    font-weight: 900; text-transform: uppercase; font-size: 12px; letter-spacing: 1px;
+    color: #777; margin: 16px 0 8px;
+}
+
+// ------------------------------------------------------------------ board switcher (topbar)
+.board-switcher { position: relative; }
+.dropdown-backdrop { position: fixed; inset: 0; z-index: 44; }   // click-away closes the dropdown
+.dropdown {
+    position: absolute; top: calc(100% + 8px); left: 0; z-index: 45;
+    min-width: 280px; max-height: 70vh; overflow: auto;
+    background: #fff; border: var(--outline);
+    border-radius: 14px 8px 14px 8px; box-shadow: 6px 6px 0 rgba(0, 0, 0, 0.3);
+    padding: 10px;
+}
+.dropdown-section-label { font-size: 11px; font-weight: 900; text-transform: uppercase; color: #888; margin: 4px 0; }
+.dropdown-item {
+    display: block; width: 100%; text-align: left;
+    background: none; border: none; font-family: inherit; font-size: 15px; font-weight: 700;
+    padding: 6px 8px; border-radius: 8px; cursor: pointer;
+}
+.dropdown-item:hover { background: rgba(0, 0, 0, 0.07); }
+.dropdown-item.active { background: var(--lime); }
+.dropdown-divider { border-top: 3px dashed var(--ink); margin: 10px 0; }
+.dropdown-new { width: 100%; }
+.invite-rows { display: flex; flex-direction: column; gap: 6px; }
+
+// ------------------------------------------------------------------ assignees
+.assignee-stack { display: inline-flex; align-items: center; gap: 2px; }
+.assignee-circle.small { width: 20px; height: 20px; font-size: 11px; border-width: 2px; }
+.assignee-pick {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: #fff; border: 2.5px solid var(--ink); border-radius: 20px;
+    padding: 2px 10px 2px 3px; font-family: inherit; font-size: 13px; font-weight: 700; cursor: pointer;
+}
+.assignee-pick.on { box-shadow: 3px 3px 0 rgba(0, 0, 0, 0.35); transform: rotate(-1deg); background: var(--lime); }
+.assignee-pick.off { opacity: 0.8; }
+.danger-zone { margin-top: 10px; }

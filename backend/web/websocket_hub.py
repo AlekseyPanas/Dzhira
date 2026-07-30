@@ -1,46 +1,62 @@
-"""The websocket hub — ONE shared socket per client, multiplexing many derived-dict subscriptions.
+"""The websocket hub — now ONE derived dict PER CONNECTION, scoped to a single board.
 
-    -> {op:"subscribe",   sub_id, derived_dict:<enum name>, key_path}
-    <- {op:"subscribed",  sub_id, value, seq}                          # initial snapshot
-    <- {op:"update",      sub_id, key_path, value|"__DELETED__", seq}  # live change
+A client connects to ``/ws?board=<name>``. The hub authenticates via the session cookie, checks the
+user's access to that board, then spins up a ``JsonFolderDerivedDict`` mirroring ONLY that board's
+folder and starts watching it. Every subscription on the connection maps to that one board dict (the
+``derived_dict`` name in the message is ignored — a connection sees exactly one board). On disconnect
+the dict is stopped and dropped, freeing its watcher. Switching boards = a fresh connection.
+
+Wire protocol (unchanged from before, minus the registry):
+    -> {op:"subscribe",   sub_id, key_path}
+    <- {op:"subscribed",  sub_id, value, seq}
+    <- {op:"update",      sub_id, key_path, value|"__DELETED__", seq}
     -> {op:"unsubscribe", sub_id}
-    <- {op:"error",       sub_id, message}
-
-Derived-dict callbacks fire on the watchdog observer thread; each frame hops onto the event loop via
-``loop.call_soon_threadsafe`` feeding a per-connection asyncio queue drained by one sender task. The
-hub adds no seq logic: it forwards the derived dict's in-order, seq-stamped stream verbatim.
-
-Ordering caveat (client contract): an ``update`` CAN arrive before its ``subscribed`` frame — a
-publish racing the subscribe gets queued first. The client buffers updates for a sub_id it hasn't
-seen ``subscribed`` for, then applies them seq-filtered. (Ported from eventCamera's WebsocketHub.)
+    <- {op:"error",       sub_id?, message}
 """
 
 import asyncio
-from typing import Any, Dict, Tuple
+from typing import Dict
 
 from fastapi import WebSocket, WebSocketDisconnect
 
-from backend.derived.pub_sub_derived_dict import APubSubDerivedDict, SubHandle, Update
+from backend.db import paths
+from backend.derived.json_folder_derived_dict import JsonFolderDerivedDict
+from backend.derived.pub_sub_derived_dict import SubHandle, Update
+from backend.services import AppServices
 from backend.util.logs import warn
-from backend.web.registry import DerivedDictsRegistry
+from backend.web.auth import COOKIE_NAME
 
 
 class WebsocketHub:
 
-    def __init__(self, registry: DerivedDictsRegistry) -> None:
-        self._registry = registry
+    def __init__(self, services: AppServices) -> None:
+        self._services = services
 
     async def handle_connection(self, websocket: WebSocket) -> None:
         await websocket.accept()
+
+        user = self._services.user_for_session(websocket.cookies.get(COOKIE_NAME))
+        if user is None:
+            await websocket.send_json({"op": "error", "message": "unauthorized"})
+            await websocket.close()
+            return
+        board = self._services.accessible_board_by_name(
+            websocket.query_params.get("board", ""), user)
+        if board is None:
+            await websocket.send_json({"op": "error", "message": "no-access"})
+            await websocket.close()
+            return
+
+        board_dict = JsonFolderDerivedDict(paths.board_dir(self._services.root, board["id"]))
+        board_dict.start_watching()
+
         event_loop = asyncio.get_running_loop()
         outbound_frames: asyncio.Queue = asyncio.Queue()
-        # sub_id -> (derived dict, its SubHandle), for replace-on-resubscribe + disconnect cleanup.
-        live_subscriptions: Dict[str, Tuple[APubSubDerivedDict, SubHandle]] = {}
+        live_subscriptions: Dict[str, SubHandle] = {}
 
         async def sender_loop() -> None:
             while True:
-                frame = await outbound_frames.get()
-                await websocket.send_json(frame)
+                await websocket.send_json(await outbound_frames.get())
 
         sender_task = asyncio.create_task(sender_loop())
         try:
@@ -48,9 +64,12 @@ class WebsocketHub:
                 message = await websocket.receive_json()
                 operation = message.get("op")
                 if operation == "subscribe":
-                    self._handle_subscribe(message, live_subscriptions, outbound_frames, event_loop)
+                    self._subscribe(board_dict, message, live_subscriptions,
+                                    outbound_frames, event_loop)
                 elif operation == "unsubscribe":
-                    self._handle_unsubscribe(message, live_subscriptions)
+                    handle = live_subscriptions.pop(message.get("sub_id"), None)
+                    if handle is not None:
+                        board_dict.unsubscribe(handle)
                 else:
                     outbound_frames.put_nowait({"op": "error", "sub_id": message.get("sub_id"),
                                                 "message": f"Unknown op {operation!r}."})
@@ -60,41 +79,25 @@ class WebsocketHub:
             warn(f"Websocket connection failed: {error!r}")
         finally:
             sender_task.cancel()
-            for derived_dict, handle in live_subscriptions.values():
-                derived_dict.unsubscribe(handle)
-            live_subscriptions.clear()
+            for handle in live_subscriptions.values():
+                board_dict.unsubscribe(handle)
+            board_dict.stop_watching()                      # free the per-connection watcher
 
-    def _handle_subscribe(self, message: Dict[str, Any],
-                          live_subscriptions: Dict[str, Tuple[APubSubDerivedDict, SubHandle]],
-                          outbound_frames: asyncio.Queue,
-                          event_loop: asyncio.AbstractEventLoop) -> None:
+    @staticmethod
+    def _subscribe(board_dict: JsonFolderDerivedDict, message: dict,
+                   live_subscriptions: Dict[str, SubHandle], outbound_frames: asyncio.Queue,
+                   event_loop: asyncio.AbstractEventLoop) -> None:
         sub_id = message.get("sub_id")
         key_path = message.get("key_path", "")
-        try:
-            derived_dict = self._registry.get_derived_dict(message.get("derived_dict"))
-        except ValueError as error:
-            outbound_frames.put_nowait({"op": "error", "sub_id": sub_id, "message": str(error)})
-            return
         if sub_id in live_subscriptions:                    # a 2nd sub() replaces the subscription
-            old_dict, old_handle = live_subscriptions.pop(sub_id)
-            old_dict.unsubscribe(old_handle)
+            board_dict.unsubscribe(live_subscriptions.pop(sub_id))
 
         def forward_update(update: Update, forward_sub_id=sub_id) -> None:
-            """Runs on the publisher's (watchdog) thread — hop the frame onto the event loop."""
             frame = {"op": "update", "sub_id": forward_sub_id, "key_path": update.key_path,
                      "value": update.value, "seq": update.seq}
             event_loop.call_soon_threadsafe(outbound_frames.put_nowait, frame)
 
-        handle = derived_dict.subscribe(key_path, forward_update)
-        live_subscriptions[sub_id] = (derived_dict, handle)
+        handle = board_dict.subscribe(key_path, forward_update)
+        live_subscriptions[sub_id] = handle
         outbound_frames.put_nowait({"op": "subscribed", "sub_id": sub_id,
                                     "value": handle.initial_value, "seq": handle.initial_seq})
-
-    @staticmethod
-    def _handle_unsubscribe(message: Dict[str, Any],
-                            live_subscriptions: Dict[str, Tuple[APubSubDerivedDict, SubHandle]]
-                            ) -> None:
-        subscription = live_subscriptions.pop(message.get("sub_id"), None)
-        if subscription is not None:
-            derived_dict, handle = subscription
-            derived_dict.unsubscribe(handle)

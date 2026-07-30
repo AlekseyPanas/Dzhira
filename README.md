@@ -44,9 +44,22 @@ Run the backend test suite with `./venv/bin/python -m pytest`.
 
 ## User Guide
 
-Everything in Dzhira is live: any change you make (or that a second browser tab makes, or that you make
-by hand-editing a JSON file in `db/`) shows up everywhere instantly. There is no "save the board" — it
-saves itself.
+**Accounts & boards.** Dzhira is now multi-user. First visit → **log in** or **create an account**
+(username + password; no reset, no OAuth). With no boards yet you land on a page to **make a board**
+(you can own up to 2) or **join one you were invited to**. A board holds its own columns, tasks, tags,
+and projects, and is owned by one person who can share full access with others.
+
+- **Switch boards** with the **📋 board** dropdown in the topbar (your boards, your pending invites,
+  and ＋ New board).
+- **Invite people** with the **✉️ Invite** button (by exact username; withdraw pending invites there).
+- The **🙂 profile** button (top-right) opens **Profile & members**: change your username/password, see
+  everyone on the board (owner/member), and — if you're the owner — **kick** members, **transfer
+  ownership**, or **delete the board**.
+- **Assignees** are board members. In the task editor, toggle any number of them (a task can have
+  none); their initial-circles show on the card. A kicked member drops off every task automatically.
+
+Everything on the board is live: any change you (or another member, or another tab) make shows up
+everywhere instantly. There is no "save the board" — it saves itself.
 
 **The board.** Columns run left to right; task cards stack inside them, top to bottom, in an order you
 control.
@@ -71,12 +84,19 @@ neighbor; 🗑️ deletes it (its tasks move to the nearest column). Scroll righ
 **Tags.** Topbar **🏷️ Tags**: each tag is a name + color. Add, rename/recolor, or delete them. Deleting
 a tag just removes it from every task that had it.
 
-**Projects.** Topbar **📁 Projects**: a project is a 3-letter code (like `ENG`). Add, rename, or delete
-them. ⚠️ **Deleting a project deletes all of its tasks** — the task id is hard-tied to the code.
+**Projects.** Topbar **📁 Projects**: a project is a 3-letter code (like `ENG`) plus a **color** (auto-
+assigned, editable via the swatch). That color shows on every card of the project — a stripe down the
+card's left edge and the tinted `#PROJ-NNN` id badge. Add, rename, or recolor projects here. ⚠️
+**Deleting a project deletes all of its tasks** — the task id is hard-tied to the code.
 
-**Assignee.** Topbar shows the single user (Dzhira is single-user). Click it to set your **name** and
-your **circle color**; the initial is drawn black or white for contrast. Every task is automatically
-assigned to you.
+**Assignees.** See *Accounts & boards* above — assignees are board members, chosen per task in the
+editor (zero or more). Each shows as an initial-circle in their color (black/white initial for contrast).
+
+**Themes.** Bottom-right corner: swap between **🖌️ paint** and **✏️ crisp**. **Paint is the default** —
+a gloriously bad hand-painted look: wobbly, half-disconnected outlines, a mostly white/grey canvas (no
+crayon rainbow), and colour fills that look brushed-in badly with visible strokes and gaps (only the
+meaningful colours — project stripes/badges, tags, the assignee circle — are coloured; everything else
+is white/grey). **Crisp** is the clean crayon look. Your choice is remembered across reloads.
 
 ---
 
@@ -300,6 +320,26 @@ the Nano render cycle: it works off DOM `data-` attributes, floats a copy of the
 cursor, and moves a dotted `.ghost-slot` to the computed insertion point. On drop it commits once via
 `taskApi.move(taskId, statusId, index)` and lets the resulting websocket update re-render the board —
 so a drag stays smooth (no per-`pointermove` re-render) and never optimistically lies about the result.
+On release it holds the floating card **snapped to the ghost slot and blocks any new drag** until that
+websocket change streams back and the real card re-renders underneath — only then is the floating copy
+removed (in the same dbFrame notification, *after* the Board's re-render — no `requestAnimationFrame`,
+which doesn't fire in a background tab). The result reads as a touch of lag on drop, never a flicker.
+
+**Themes** ([`theme.ts`](frontend/src/theme.ts), [`ThemeSwitcher.tsx`](frontend/src/components/ThemeSwitcher.tsx))
+flip a `data-theme` attribute on `<html>` (persisted in `localStorage`); both themes compile into the
+one bundle. The crisp theme is [`styles.scss`](frontend/src/styles.scss) (untouched); the
+[`styles-paint.scss`](frontend/src/styles-paint.scss) overrides are scoped under
+`:root[data-theme="paint"]` and roughen element outlines with an SVG `feTurbulence`+`feDisplacementMap`
+filter (`#paintRough`, defined in `index.html`) applied to a `::before` border pseudo — so the borders
+look hand-drawn while the text stays crisp. Paint is the **default** for a first-timer (only an explicit
+crisp choice opts out); it kills the crayon palette by redefining the `--hotpink`/`--sunny`/… variables
+to white/grey (only the inline data-colours survive) and fakes a "coloured-in-badly" fill via a
+`bad-paint-fill` mixin — a streaky white `background-image` layered over each coloured element's inline
+`background-color` (hence the card fills use `background-color`, not the `background` shorthand, which
+would wipe the image). **Project color:** a project carries a `color` (default is
+a stable palette pick by hashing the code — the same rule in [`layout.py`](backend/db/layout.py) and
+[`model.ts`](frontend/src/model.ts), so a legacy color-less project still resolves consistently); each
+card renders it as a left stripe + tinted id badge.
 
 #### 2.9 Code map
 
@@ -334,17 +374,95 @@ frontend/
     api.ts               POST write client (bare ack / error string)
     model.ts             typed views over dbFrame (+ contrast-ink, initials)
     ui.ts                open/close popouts + confirm helpers
-    drag_controller.ts   pointer drag & drop with the ghost slot
-    components/          Topbar, Board, TaskCard, Popups, TaskEditor, managers, shared_widgets
-    styles.scss          the MS-Paint stylesheet
+    theme.ts             crisp/paint theme state (data-theme attr, localStorage)
+    drag_controller.ts   pointer drag & drop with the ghost slot + commit-hold
+    components/          Topbar, Board, TaskCard, Popups, TaskEditor, managers,
+                         ThemeSwitcher, shared_widgets
+    styles.scss          the crisp MS-Paint stylesheet
+    styles-paint.scss    the swappable "horrific hand-painted" theme overrides
 ```
+
+#### 2.10 Accounts, boards & invites (multi-user)
+
+Dzhira is multi-user. The DB grew a top level: `db/users/`, `db/user_names/` (case-insensitive
+uniqueness + login index), `db/sessions/`, `db/invites/`, and `db/boards/<bid>/` — each board its own
+folder of `board.json` + `columns/ tags/ projects/ tasks/`. A task gained `assignees:[user_id…]`.
+
+- **Stores** ([`backend/db/`](backend/db/)): `passwords.py` (pbkdf2), `sessions.py` (file sessions,
+  ~10-yr cookie), `accounts.py`, `boards.py` (create/access/members/kick/transfer/delete), `invites.py`,
+  and the shared `jsonstore.py` (atomic write + flocked RMW). `board_api.py` now scopes to one board
+  folder. `paths.py` + `seeding.py` (per-board starter content, project/user color palettes).
+- **[`backend/services.py`](backend/services.py)** — `AppServices` owns every store and the cross-store
+  operations (invite accept/reject/withdraw, member lists, owner-only guards, assignee validation). The
+  HTTP router and websocket hub both take it.
+- **Per-connection derived dict** ([`backend/web/websocket_hub.py`](backend/web/websocket_hub.py)):
+  a client connects to `/ws?board=<name>`; the hub authenticates via the session cookie, checks board
+  access, and spins up a `JsonFolderDerivedDict` for *just that board's* folder — dropped on disconnect.
+  Switching boards is a fresh connection. Board list / invites / member names are ordinary API calls
+  ([`http_routers.py`](backend/web/http_routers.py)); board content still streams over the socket.
+- **Frontend** ([`frontend/src/`](frontend/src/)): a tiny SPA `router.ts` (`/login /create /new
+  /board/$name`); `board_session.ts` drives the socket + members off the route; `AuthPage`,
+  `NoBoardsPage`, `BoardView`, and the `board_menus.tsx` (switcher, invite, profile+members). The theme
+  selector is intentionally hidden and **paint is forced** in `client.tsx` (nothing deleted — see the
+  note in `BoardView`).
 
 ---
 
-## Credits & lineage
+## Original spec: Accounts & multi-board — ✅ implemented
 
-The read-path architecture (derived dicts, the websocket hub, the frontend frames) is ported and
-deliberately *slimmed down* from the author's **eventCamera** project, which pioneered the
-"derived dictionaries as read-only backend state, streamed to Nano JSX frames" pattern. The frontend
-build setup follows the same author's **SadkoTrans** admin dashboard. Dzhira keeps the good bones and
-throws away everything it doesn't need — then paints the result in crayon.
+> This section is the original feature spec for the accounts push. It is now built (see §2.10 above);
+> kept here as the design record. (Credits section intentionally removed.)
+
+### Accounts
+
+Let's actually go through and make a full accounts stack. An account is a username and a password. The password is hashed.
+The JSON database remains but gets an upgrade. Each board is owned by one user and gives any number of users full access.
+Ownership can be transferred and boards can be deleted or created with a max of 2 per user. A board is a combination of all the
+data we have currently, except now we will have more instances of course. Users are identified by a unique ID. There is no
+resetting passwords, no login with google, just passwords and usernames.
+
+When a user newly enters the site they are prompted to log in or make an account. Logging in requires username and password.
+Switching to create account is the same but there is a password confirmation field. Once an account is made, the system
+checks if the user has any boards available (owned or shared). If yes, it takes them to the app page. If not, a special page
+shows which is largely empty save for two options: make a new board (name it and enter), or join one. Joining requires you to be
+invited, so a list there shows all invites to the given username. If none then it just shows no invites available
+
+In the actual board view, you get more menus! Firstly, topbar gets a board switching menu. Expanding this dropdown opens the list
+of available boards to this user, by name. At the bottom of the list is a divider followed by a second list of invites each
+of which can be rejected or accepted, same as on the big screen when you have no boards (Maybe just same component can be shared here).
+At the bottom is a button, + to make a new board IF you dont already own 2 which opens a modal to enter the name of the new board 
+and buttons to proceed or cancel.
+
+At the topbar is another button to generate invites. Clicking it opens a modal. There is a topmost field to invite people by
+username. The username must be typed in exactly write and it validates against backend. Usernames, to avoid
+confusion, as not case sensitive so Bob and bob cannot both exist. Below the entry bar to invite is a list of extended invites
+that already exist. These can be withdrawn. They vanish if the user accepts or rejects.
+
+The former assignee topbar menu is now the profile and members menu. Opening it allows you to edit your own username or to change your
+password via entering the current one, new one, then confirming. Below that is a list of other users currently in the board and the ability
+to kick them IF you are the owner. Next to each one, including your own profile, it shows "owner" or "member". 
+
+Tasks now show a dropdown to choose the assignee. A kicked assignee will be removed from all tasks. Tasks need not have an assignee. Multiple
+assignees can also exist.
+
+The paths are /login, /create (for create account), /new (for the "I have no boards" screen), /board/$name (board name must be unique).
+
+For user validation we will use sessions persisted to files and cleaned up. Sessions will have many years of lifetime so they never
+really expire and persist across server restarts (like js express-session with file storage, but python equivalent). All the logged in
+actions require the session or else they redirect to login
+
+Now we cant have a synced derived dict for the entire database state at all times, that a bad idea. Instead, the state is pulled in
+for a given board for a connected websocket. The websocket connects on a given board by the /board/$name url, so changing a board will reconnect the websocket.
+Any attempt to navigate to a board you dont have access to will take you to your default board on login. In fact, this is how it works:
+logged out users are taken to the login page, logged in users are taken to the first board they have access to or /new, OR to a board
+they have access to whose URL they explicitly entered. Otherwise redirect to the right place. Once the board loads and the socket connects,
+the backend initializes a new derived dict instance for this user, drawing in only the JSON files that pertain to that specific board.
+Account level actions such as the profile username change or password change are going to be API calls with replies and loading icons,
+typical web rather than websocket auto sync. This does mean that changing your username requires a refresh for it to appear if you changed
+it in another window. This is fine. The rest of the board app will sync properly. Once the user websocket disconnects, the derived dict
+can drop also and the memory can be freed.
+
+Also for the styles, lets hide (comment out) the theme selector and keep the paint style as our main. Do not delete any of it. Leave it
+so that if we simply uncomment styling it can work on the board page, but do not extend the other style to the other pages for now, though
+it should be doable later. The reason is because for my joke showcase of this app I want only the paint style all throughout and no curious user changing it.
+

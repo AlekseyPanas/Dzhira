@@ -5,14 +5,15 @@
 import Nano, { h } from "nano-jsx";
 import { taskApi } from "../api";
 import { consumeDragClick } from "../drag_controller";
-import { assignee, contrastInk, firstInitial, projectOf, tagsById, type Task } from "../model";
+import { contrastInk, firstInitial, membersById, projectColor, projectOf, tagsById, type Task } from "../model";
 import { askConfirm, openPopup } from "../ui";
 import { truncate } from "./shared_widgets";
 
 export const TaskCard = (props: { task: Task }) => {
     const task = props.task;
     const tagMap = tagsById();
-    const who = assignee();
+    const memberMap = membersById();
+    const projectHue = projectColor(projectOf(task.id));    // the card's left stripe + id badge color
 
     const onDelete = (event: Event) => {
         event.stopPropagation();                            // don't also open the editor
@@ -30,6 +31,7 @@ export const TaskCard = (props: { task: Task }) => {
 
     return (
         <div class="task-card" data-task-id={task.id} data-status={task.status} onClick={onCardClick}>
+            <div class="card-stripe" title={projectOf(task.id)} style={`background-color:${projectHue}`}></div>
             <button class="card-trash" title="delete task" onClick={onDelete}>🗑️</button>
             <div class="card-title">{task.title || "(untitled)"}</div>
             {task.description
@@ -40,17 +42,22 @@ export const TaskCard = (props: { task: Task }) => {
                     {task.tags.map((tagId) => {
                         const tag = tagMap[tagId];
                         if (!tag) return null;
-                        return <span class="tag-chip" style={`background:${tag.color}; color:${contrastInk(tag.color)}`}>
+                        return <span class="tag-chip" style={`background-color:${tag.color}; color:${contrastInk(tag.color)}`}>
                             {tag.name}
                         </span>;
                     })}
                 </div>
                 <div class="card-meta">
-                    <span class="card-id">#{projectOf(task.id)}-{task.id.split("-")[1]}</span>
-                    <span class="assignee-circle"
-                          title={who.name}
-                          style={`background:${who.color}; color:${contrastInk(who.color)}`}>
-                        {firstInitial(who.name)}
+                    <span class="card-id" style={`background-color:${projectHue}; color:${contrastInk(projectHue)}`}>#{projectOf(task.id)}-{task.id.split("-")[1]}</span>
+                    <span class="assignee-stack">
+                        {task.assignees.map((uid) => {
+                            const member = memberMap[uid];
+                            if (!member) return null;
+                            return <span class="assignee-circle small" title={member.username}
+                                         style={`background-color:${member.color}; color:${contrastInk(member.color)}`}>
+                                {firstInitial(member.username)}
+                            </span>;
+                        })}
                     </span>
                 </div>
             </div>

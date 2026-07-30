@@ -1,29 +1,30 @@
-"""Shared fixtures. ``board`` gives a clean, UNSEEDED DB (just the empty subfolders) so each test
-builds exactly the columns/projects/tasks it needs and asserts against nothing it didn't create."""
+"""Shared fixtures. ``board`` gives a clean, UNSEEDED board folder (just the empty content subfolders)
+so each test builds exactly the columns/projects/tasks it needs and asserts against nothing else."""
 
 import json
 
 import pytest
 
 from backend.db.board_api import BoardAPI
-from backend.db.layout import SUBFOLDERS
+from backend.db.paths import BOARD_SUBFOLDERS
 
 
 @pytest.fixture
-def db_root(tmp_path):
-    for subfolder in SUBFOLDERS:
-        (tmp_path / subfolder).mkdir()
-    return tmp_path
+def board_dir(tmp_path):
+    folder = tmp_path / "board"
+    for subfolder in BOARD_SUBFOLDERS:
+        (folder / subfolder).mkdir(parents=True)
+    return folder
 
 
 @pytest.fixture
-def board(db_root):
-    return BoardAPI(db_root)
+def board(board_dir):
+    return BoardAPI(board_dir)
 
 
-def load_json(db_root, subfolder, name):
-    return json.loads((db_root / subfolder / f"{name}.json").read_text(encoding="utf-8"))
+def load_json(root, subfolder, name):
+    return json.loads((root / subfolder / f"{name}.json").read_text(encoding="utf-8"))
 
 
-def exists(db_root, subfolder, name):
-    return (db_root / subfolder / f"{name}.json").is_file()
+def exists(root, subfolder, name):
+    return (root / subfolder / f"{name}.json").is_file()
